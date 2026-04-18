@@ -341,16 +341,16 @@ function Home() {
       color: "#FF5722",
       lightColor: "#FBE9E7"
     },
-    {
-      id: "packing",
-      title: "Packing Copy",
-      icon: "📋",
-      description: "Create detailed packing slips for dispatch and delivery verification",
-      theoreticalInfo: "Packing slips list all items in a shipment, quantities, and special handling instructions for warehouse staff.",
-      stats: `${dispatchStats.pendingDispatches} pending dispatches`,
-      color: "#FF9800",
-      lightColor: "#FFF3E0"
-    },
+    // {
+    //   id: "packing",
+    //   title: "Packing Copy",
+    //   icon: "📋",
+    //   description: "Create detailed packing slips for dispatch and delivery verification",
+    //   theoreticalInfo: "Packing slips list all items in a shipment, quantities, and special handling instructions for warehouse staff.",
+    //   stats: `${dispatchStats.pendingDispatches} pending dispatches`,
+    //   color: "#FF9800",
+    //   lightColor: "#FFF3E0"
+    // },
     {
       id: "dispatch",
       title: "Dispatch Details",
@@ -361,16 +361,27 @@ function Home() {
       color: "#9C27B0",
       lightColor: "#F3E5F5"
     },
-    {
-      id: "sticker",
-      title: "Create Sticker",
-      icon: "🏷️",
-      description: "Design custom labels for branding, warnings, and shipping instructions",
-      theoreticalInfo: "Create weather-resistant stickers with custom text, logos, and barcodes for product identification.",
-      stats: "Print-ready sticker designs",
-      color: "#E91E63",
-      lightColor: "#FCE4EC"
-    },
+    // Add this to your navigationCards array (around line 315)
+{
+  id: "draft-packing",
+  title: "Draft Packing List",
+  icon: "📝",
+  description: "Create and manage draft packing lists before final dispatch",
+  theoreticalInfo: "Create preliminary packing lists, review items, make changes, and convert to final dispatch when ready. Perfect for planning and approval workflows.",
+  stats: "Save drafts for later processing",
+  color: "#607D8B",
+  lightColor: "#ECEFF1"
+},
+    // {
+    //   id: "sticker",
+    //   title: "Create Sticker",
+    //   icon: "🏷️",
+    //   description: "Design custom labels for branding, warnings, and shipping instructions",
+    //   theoreticalInfo: "Create weather-resistant stickers with custom text, logos, and barcodes for product identification.",
+    //   stats: "Print-ready sticker designs",
+    //   color: "#E91E63",
+    //   lightColor: "#FCE4EC"
+    // },
     {
       id: "gatepass",
       title: "Gatepass Creation",

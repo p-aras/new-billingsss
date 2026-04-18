@@ -6,7 +6,7 @@ import "./PartyBill.css";
 import jsPDF from 'jspdf';
 
 // Google Apps Script URL - REPLACE WITH YOUR DEPLOYED WEB APP URL
-const APPS_CRIPT_URL = "https://script.google.com/macros/s/AKfycbyvQA0bGHiRoEQoNNsC01rZsr8ug8Eefo7KdDr5WKvDyD2qtWK2yYoDj4p3dUfcUrmi/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby6xq5wwpc_gfKxQa1edafvw5ocKFHgMgMsC83vHnXxZt3kqZpC6u9i7AwsIan831TH/exec";
 
 // Bills Sheet ID - Replace with your Bills sheet ID
 const BILLS_SHEET_ID = "1s8cXaMtG2XSxdOu1Ecve5aLI2MQcbMjVsn6Sih4hItk";
@@ -71,6 +71,15 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
   const [lotSummary, setLotSummary] = useState([]);
   const [loadingLotSummary, setLoadingLotSummary] = useState(false);
   const [selectedLotForSummary, setSelectedLotForSummary] = useState(null);
+  // Add these with your other state variables
+// Add these with your other state variables
+const [packingMaterials, setPackingMaterials] = useState({
+  totalBoxes: 0,
+  totalBags: 0,
+  totalPolybags: 0
+});
+const [isPackingMaterialsModalOpen, setIsPackingMaterialsModalOpen] = useState(false);
+const [tempBillDataForDraft, setTempBillDataForDraft] = useState(null);
   
   // On-screen keyboard state
   const [showNumericKeyboard, setShowNumericKeyboard] = useState(false);
@@ -109,94 +118,119 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
 
   // ==================== LOT SUGGESTIONS FUNCTIONS ====================
   
-  const searchLotsWithSuggestions = (searchTerm) => {
-    if (!searchTerm || searchTerm.trim() === "") {
-      setLotSuggestions([]);
-      setShowLotSuggestions(false);
-      return;
-    }
-    
-    const allProducts = [...sheetData, ...oldLotData];
-    const searchLower = searchTerm.toLowerCase().trim();
-    
-    const matches = allProducts.filter(product => {
-      const lotNumber = product['Lot Number']?.toString().toLowerCase() || "";
-      const itemName = product['Garment Type'] || product['Item Name'] || "";
-      const brand = product['Party Name'] || product['Brand'] || "";
-      
-      return lotNumber.includes(searchLower) || 
-             itemName.toLowerCase().includes(searchLower) ||
-             brand.toLowerCase().includes(searchLower);
-    });
-    
-    const uniqueMatches = [];
-    const seen = new Set();
-    
-    matches.forEach(product => {
-      const lotNumber = product['Lot Number']?.toString() || "";
-      const description = product['Garment Type'] || product['Item Name'] || "";
-      const brand = product['Party Name'] || product['Brand'] || "";
-      const key = `${lotNumber}-${description}`;
-      
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueMatches.push({
-          lotNumber: lotNumber,
-          barcode: product['Barcode ID'] || `LOT-${lotNumber}`,
-          description: description,
-          brand: brand,
-          piecesPerSet: product['Pieces Per Set'] || product['PiecesPerSet'] || 0,
-          totalPieces: product['Total Pieces'] || 0,
-          colors: product['Colors'] || [],
-          sizes: product['Sizes'] || [],
-          source: product['Source'] || 'Main',
-          isOldLot: product['Source'] === 'OLD LOT'
-        });
-      }
-    });
-    
-    const suggestions = uniqueMatches.slice(0, 10);
-    setLotSuggestions(suggestions);
-    setShowLotSuggestions(suggestions.length > 0);
-    setSelectedSuggestionIndex(-1);
-    
-    addDebugMessage(`Found ${suggestions.length} suggestions for "${searchTerm}"`, 'info');
-  };
-
-  const selectLotFromSuggestion = (suggestion) => {
-    addDebugMessage(`Selected lot: ${suggestion.lotNumber} - ${suggestion.description}`, 'success');
-    
-    const productData = {
-      barcode: suggestion.barcode,
-      lotNumber: suggestion.lotNumber,
-      sets: "",
-      setsPerPcs: suggestion.piecesPerSet,
-      loosePcs: 0,
-      looseOperation: "add",
-      brand: suggestion.brand,
-      item: suggestion.description,
-      quantity: 0,
-      totalPieces: suggestion.totalPieces,
-      colors: suggestion.colors || [],
-      sizes: suggestion.sizes || [],
-      sizeQuantities: {},
-      colorDetails: {}
-    };
-    
-    setCurrentProduct(productData);
-    setSelectedLotForSummary(suggestion.lotNumber);
-    setManualLotInput(suggestion.lotNumber);
-    setLotSearchTerm(suggestion.lotNumber);
+const searchLotsWithSuggestions = (searchTerm) => {
+  if (!searchTerm || searchTerm.trim() === "") {
+    setLotSuggestions([]);
     setShowLotSuggestions(false);
+    return;
+  }
+  
+  const allProducts = [...sheetData, ...oldLotData];
+  
+  if (allProducts.length === 0) {
+    addDebugMessage("No product data available for search", 'warning');
+    setLotSuggestions([]);
+    setShowLotSuggestions(false);
+    return;
+  }
+  
+  const searchLower = searchTerm.toLowerCase().trim();
+  
+  // Search in Lot Number field using includes (case-insensitive)
+  const matches = allProducts.filter(product => {
+    const lotNumber = product['Lot Number']?.toString().toLowerCase() || "";
+    return lotNumber.includes(searchLower);
+  });
+  
+  addDebugMessage(`Search for "${searchTerm}" found ${matches.length} matches`, 'info');
+  
+  if (matches.length > 0) {
+    const firstFew = matches.slice(0, 5).map(p => `${p['Lot Number']} - ${p['Garment Type'] || p['Item Name']}`);
+    addDebugMessage(`First few matches: ${firstFew.join(', ')}`, 'info');
+  }
+  
+  // Create suggestions WITHOUT deduplication - keep all entries
+  const suggestions = [];
+  
+  matches.forEach(product => {
+    const lotNumber = product['Lot Number']?.toString() || "";
+    if (!lotNumber) return;
     
-    playBeepSound();
-    showToast(`Selected: ${suggestion.description}`, 'success');
+    const description = product['Garment Type'] || product['Item Name'] || "";
+    const brand = product['Brand'] || product['Party Name'] || "";
+    const piecesPerSet = product['Pieces Per Set'] || product['PiecesPerSet'] || 0;
     
-    setTimeout(() => {
-      const setsInput = document.querySelector('.blue-sets-input');
-      if (setsInput) setsInput.focus();
-    }, 100);
+    // Create a unique ID for each entry
+    const uniqueId = `${lotNumber}_${description}_${Date.now()}_${Math.random()}`;
+    
+    suggestions.push({
+      id: uniqueId,
+      lotNumber: lotNumber,
+      barcode: product['Barcode ID'] || `LOT-${lotNumber}`,
+      description: description,
+      displayDescription: piecesPerSet > 0 ? `${description} ${piecesPerSet}S` : description,
+      brand: brand,
+      piecesPerSet: piecesPerSet,
+      totalPieces: product['Total Pieces'] || 0,
+      colors: product['Colors'] || [],
+      sizes: product['Sizes'] || [],
+      source: product['Source'] || (product['Party Name'] ? 'Main' : 'OLD LOT'),
+      isOldLot: product['Source'] === 'OLD LOT' || !product['Party Name'],
+      rawData: product // Store the full product data
+    });
+  });
+  
+  // Sort suggestions by lot number then by description
+  suggestions.sort((a, b) => {
+    // First sort by lot number
+    const lotCompare = a.lotNumber.localeCompare(b.lotNumber, undefined, { numeric: true });
+    if (lotCompare !== 0) return lotCompare;
+    // Then by description for same lot number
+    return a.description.localeCompare(b.description);
+  });
+  
+  const limitedSuggestions = suggestions.slice(0, 30); // Show up to 30 entries
+  
+  setLotSuggestions(limitedSuggestions);
+  setShowLotSuggestions(limitedSuggestions.length > 0);
+  setSelectedSuggestionIndex(-1);
+  
+  addDebugMessage(`Found ${suggestions.length} total entries for "${searchTerm}" (showing ${limitedSuggestions.length})`, 'success');
+};
+ const selectLotFromSuggestion = (suggestion) => {
+  addDebugMessage(`Selected: ${suggestion.lotNumber} - ${suggestion.description}`, 'success');
+  
+  const productData = {
+    barcode: suggestion.barcode,
+    lotNumber: suggestion.lotNumber,
+    sets: "",
+    setsPerPcs: suggestion.piecesPerSet,
+    loosePcs: 0,
+    looseOperation: "add",
+    brand: suggestion.brand,
+    item: suggestion.description,  // Use the specific description for this entry
+    quantity: 0,
+    totalPieces: suggestion.totalPieces,
+    colors: suggestion.colors || [],
+    sizes: suggestion.sizes || [],
+    sizeQuantities: {},
+    colorDetails: {}
   };
+  
+  setCurrentProduct(productData);
+  setSelectedLotForSummary(suggestion.lotNumber);
+  setManualLotInput(suggestion.lotNumber);
+  setLotSearchTerm(suggestion.lotNumber);
+  setShowLotSuggestions(false);
+  
+  playBeepSound();
+  showToast(`Selected: ${suggestion.description}`, 'success');
+  
+  setTimeout(() => {
+    const setsInput = document.querySelector('.blue-sets-input');
+    if (setsInput) setsInput.focus();
+  }, 100);
+};
 
   const handleLotInputKeyDown = (e) => {
     if (!showLotSuggestions || lotSuggestions.length === 0) {
@@ -290,53 +324,272 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
   
   // ==================== GOOGLE SHEETS STORAGE FUNCTIONS ====================
   
-  const saveBillToGoogleSheet = async (billData) => {
-    try {
-      setSavingToSheet(true);
-      setProcessingStage('sheet');
-      addDebugMessage("Saving packing list to Google Sheets...");
-      
-      const billDataWithPreparer = {
-        ...billData,
-        preparedBy: preparedBy,
-        preparedByRole: userRole,
-        preparedByEmail: userEmail,
-        preparedAt: new Date().toISOString()
-      };
-      
-      const encodedData = encodeURIComponent(JSON.stringify(billDataWithPreparer));
-      const urlEncodedData = `data=${encodedData}`;
-      
-      const response = await fetch(APPS_CRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: urlEncodedData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        addDebugMessage(`✅ Packing list ${billData.packingNumber} saved`, 'success');
-        showToast(`Packing list saved to Google Sheets`, "success");
-        await fetchLotSummary();
-        return true;
-      } else {
-        throw new Error(result.error);
-      }
-      
-    } catch (error) {
-      console.error("Error saving to Google Sheets:", error);
-      addDebugMessage(`❌ Failed to save: ${error.message}`, 'error');
-      showToast("Failed to save to Google Sheets, but PDF is downloaded", "warning");
-      return false;
-    } finally {
-      setSavingToSheet(false);
-      if (processingStage === 'sheet') setProcessingStage(null);
+const saveBillToGoogleSheet = async (billData) => {
+  try {
+    setSavingToSheet(true);
+    setProcessingStage('sheet');
+    
+    // Debug: Check packing materials before saving
+    console.log("🔍 DEBUG - Bill Data before saving:", {
+      packingMaterials: billData.packingMaterials,
+      totalBoxes: billData.packingMaterials?.totalBoxes,
+      totalBags: billData.packingMaterials?.totalBags,
+      totalPolybags: billData.packingMaterials?.totalPolybags
+    });
+    
+    addDebugMessage(`Saving packing list to Google Sheets with: Boxes=${billData.packingMaterials?.totalBoxes || 0}, Bags=${billData.packingMaterials?.totalBags || 0}, Polybags=${billData.packingMaterials?.totalPolybags || 0}`, 'info');
+    
+    const billDataWithPreparer = {
+      ...billData,
+      preparedBy: preparedBy,
+      preparedByRole: userRole,
+      preparedByEmail: userEmail,
+      preparedAt: new Date().toISOString()
+    };
+    
+    const encodedData = encodeURIComponent(JSON.stringify(billDataWithPreparer));
+    const urlEncodedData = `data=${encodedData}&type=final`;
+    
+    console.log("📦 Sending data:", urlEncodedData.substring(0, 500)); // Log first 500 chars
+    
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: urlEncodedData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      addDebugMessage(`✅ Packing list ${billData.packingNumber} saved`, 'success');
+      showToast(`Packing list saved to Google Sheets`, "success");
+      await fetchLotSummary();
+      return true;
+    } else {
+      throw new Error(result.error);
     }
-  };
+    
+  } catch (error) {
+    console.error("Error saving to Google Sheets:", error);
+    addDebugMessage(`❌ Failed to save: ${error.message}`, 'error');
+    showToast("Failed to save to Google Sheets, but PDF is downloaded", "warning");
+    return false;
+  } finally {
+    setSavingToSheet(false);
+    if (processingStage === 'sheet') setProcessingStage(null);
+  }
+};
+// NEW FUNCTION: Save bill as draft
+const saveBillToDraftSheet = async (billData) => {
+  try {
+    setSavingToSheet(true);
+    setProcessingStage('sheet');
+    addDebugMessage("Saving draft to Google Sheets...");
+    
+    const draftData = {
+      ...billData,
+      preparedBy: preparedBy,
+      preparedByRole: userRole,
+      preparedByEmail: userEmail,
+      preparedAt: new Date().toISOString(),
+      status: 'DRAFT',
+      documentType: 'DRAFT'
+    };
+    
+    const encodedData = encodeURIComponent(JSON.stringify(draftData));
+    const urlEncodedData = `data=${encodedData}&type=draft`;
+    
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: urlEncodedData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      addDebugMessage(`✅ Draft ${billData.packingNumber} saved to Draft Sheet`, 'success');
+      showToast(`Draft saved with ID: ${billData.packingNumber}`, "success");
+      return true;
+    } else {
+      throw new Error(result.error);
+    }
+    
+  } catch (error) {
+    console.error("Error saving draft:", error);
+    addDebugMessage(`❌ Failed to save draft: ${error.message}`, 'error');
+    showToast("Failed to save draft", "error");
+    return false;
+  } finally {
+    setSavingToSheet(false);
+    if (processingStage === 'sheet') setProcessingStage(null);
+  }
+};
 
+// NEW FUNCTION: Handle final action selection
+const handleFinalAction = (action) => {
+  setIsConfirmModalOpen(false);
+  
+  if (action === 'final') {
+    setTempBillData({ ...billForm });
+    setIsPackingMaterialsModalOpen(true);
+  } else if (action === 'draft') {
+    setTempBillDataForDraft({ ...billForm });
+    handleSaveAsDraft();
+  }
+};
+
+// NEW FUNCTION: Save as draft
+const handleSaveAsDraft = async () => {
+  if (!tempBillDataForDraft) return;
+  
+  const packingNumber = await getNextPackingNumber();
+  
+  const draftData = {
+    billNumber: packingNumber,
+    packingNumber: packingNumber,
+    partyName: selectedPartyState?.name || tempBillDataForDraft.partyName,
+    billDate: tempBillDataForDraft.billDate,
+    dueDate: tempBillDataForDraft.dueDate,
+    orderReference: tempBillDataForDraft.orderReference || "",
+    items: tempBillDataForDraft.items.map(item => ({
+      id: item.id,
+      barcode: item.barcode,
+      lotNumber: item.lotNumber,
+      brand: item.brand,
+      description: item.description,
+      sets: item.sets,
+      setsPerPcs: item.setsPerPcs,
+      loosePcs: item.loosePcs,
+      looseOperation: item.looseOperation || "add",
+      quantity: item.quantity,
+      colors: item.colors,
+      sizes: item.sizes
+    })),
+    notes: tempBillDataForDraft.notes,
+    createdDate: new Date().toISOString(),
+    preparedBy: preparedBy,
+    preparedByRole: userRole,
+    preparedByEmail: userEmail,
+    status: 'DRAFT',
+    documentType: 'DRAFT'
+  };
+  
+  const saved = await saveBillToDraftSheet(draftData);
+  
+  if (saved) {
+    setShowSuccessAnimation(true);
+    setTimeout(() => setShowSuccessAnimation(false), 2000);
+    
+    if (onSubmit) onSubmit(draftData);
+    
+    setBillForm({
+      partyName: selectedParty?.name || "",
+      billDate: new Date().toISOString().split('T')[0],
+      dueDate: "",
+      items: [],
+      notes: ""
+    });
+    if (!selectedParty) setSelectedPartyState(null);
+    setCurrentProduct({
+      barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
+      looseOperation: "add",
+      brand: "", item: "", quantity: 1, totalPieces: "",
+      colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
+    });
+    setTempBillDataForDraft(null);
+    
+    if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    await fetchLotSummary();
+  }
+};
+
+// NEW FUNCTION: Handle final submission with packing materials
+// NEW FUNCTION: Handle final submission with packing materials
+const handleFinalSubmissionWithMaterials = async (materials) => {
+  if (!tempBillData) return;
+  
+  const packingNumber = await getNextPackingNumber();
+  
+  // Use the materials passed from the modal, not the state
+  const packingDataForStorage = {
+    billNumber: packingNumber,
+    packingNumber: packingNumber,
+    partyName: selectedPartyState?.name || tempBillData.partyName,
+    billDate: tempBillData.billDate,
+    dueDate: tempBillData.dueDate,
+    orderReference: tempBillData.orderReference || "",
+    items: tempBillData.items.map(item => ({
+      id: item.id,
+      barcode: item.barcode,
+      lotNumber: item.lotNumber,
+      brand: item.brand,
+      description: item.description,
+      sets: item.sets,
+      setsPerPcs: item.setsPerPcs,
+      loosePcs: item.loosePcs,
+      looseOperation: item.looseOperation || "add",
+      quantity: item.quantity,
+      colors: item.colors,
+      sizes: item.sizes
+    })),
+    notes: tempBillData.notes,
+    packingMaterials: {
+      totalBoxes: materials.totalBoxes,
+      totalBags: materials.totalBags,
+      totalPolybags: materials.totalPolybags
+    },
+    createdDate: new Date().toISOString(),
+    preparedBy: preparedBy,
+    preparedByRole: userRole,
+    preparedByEmail: userEmail,
+    status: 'FINAL'
+  };
+  
+  // Debug: Log what's being sent
+  addDebugMessage(`Saving with packing materials: Boxes=${materials.totalBoxes}, Bags=${materials.totalBags}, Polybags=${materials.totalPolybags}`, 'info');
+  
+  // Show what's being saved
+  console.log("Packing Data to Save:", packingDataForStorage);
+  
+  const pdfGenerated = await generatePackingList(packingDataForStorage);
+  
+  if (pdfGenerated) {
+    await saveBillToGoogleSheet(packingDataForStorage);
+    setShowSuccessAnimation(true);
+    setProcessingStage('complete');
+    setTimeout(() => setShowSuccessAnimation(false), 2000);
+    setTimeout(() => setProcessingStage(null), 2000);
+    
+    if (onSubmit) onSubmit(packingDataForStorage);
+    
+    setBillForm({
+      partyName: selectedParty?.name || "",
+      billDate: new Date().toISOString().split('T')[0],
+      dueDate: "",
+      items: [],
+      notes: ""
+    });
+    setPackingMaterials({ totalBoxes: 0, totalBags: 0, totalPolybags: 0 });
+    if (!selectedParty) setSelectedPartyState(null);
+    setCurrentProduct({
+      barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
+      looseOperation: "add",
+      brand: "", item: "", quantity: 1, totalPieces: "",
+      colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
+    });
+    setTempBillData(null);
+    
+    showToast(`Packing list ${packingNumber} generated with ${materials.totalBoxes} Boxes, ${materials.totalBags} Bags, ${materials.totalPolybags} Polybags!`, 'success');
+    if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    
+    await fetchLotSummary();
+  }
+};
   // ==================== LOT DETAILS FUNCTIONS ====================
   
   const fetchLotDetails = async (lotNumber) => {
@@ -446,21 +699,17 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
 
   // ==================== LOT SUMMARY FUNCTIONS ====================
   
-  const fetchLotSummaryWithData = async (allProductData) => {
-    setLoadingLotSummary(true);
-    addDebugMessage("Fetching lot summary from Bills sheet...");
+const fetchLotSummaryWithData = async (allProductData) => {
+  setLoadingLotSummary(true);
+  addDebugMessage("Fetching lot summary from Bills sheet...");
+  
+  try {
+    const billsData = await fetchBillsFromSheet();
     
-    try {
-      const billsData = await fetchBillsFromSheet();
-      
-      if (!billsData || billsData.length === 0) {
-        addDebugMessage("No bills data found", 'warning');
-        setLotSummary([]);
-        return;
-      }
-      
-      const dispatchedMap = new Map();
-      
+    // Map to track dispatched quantities
+    const dispatchedMap = new Map();
+    
+    if (billsData && billsData.length > 0) {
       billsData.forEach(bill => {
         if (bill['Bill Data (JSON)']) {
           try {
@@ -482,100 +731,90 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
           }
         }
       });
+    }
+    
+    addDebugMessage(`Dispatched totals: ${JSON.stringify(Object.fromEntries(dispatchedMap))}`, 'info');
+    
+    const summary = [];
+    const processedLots = new Set();
+    
+    // FIRST: Process ALL lots from product database (sheetData and oldLotData)
+    addDebugMessage(`Processing ${allProductData.length} total products from database...`, 'info');
+    
+    allProductData.forEach(product => {
+      const lotNumber = product['Lot Number'];
+      if (!lotNumber || processedLots.has(lotNumber)) return;
       
-      addDebugMessage(`Dispatched totals: ${JSON.stringify(Object.fromEntries(dispatchedMap))}`, 'info');
+      processedLots.add(lotNumber);
       
-      const summary = [];
-      const processedLots = new Set();
+      // Calculate total pieces from product data
+      let totalPieces = product['Total Pieces'];
+      if (!totalPieces || totalPieces === 0) {
+        const piecesPerSet = parseInt(product['Pieces Per Set']) || 0;
+        const numberOfSets = parseInt(product['Number of Sets']) || parseInt(product['Total Sets']) || 0;
+        totalPieces = piecesPerSet * numberOfSets;
+      }
+      totalPieces = Number(totalPieces) || 0;
       
-      // Process OLD LOTS
-      addDebugMessage(`Processing ${oldLotData.length} OLD LOTS...`, 'info');
-      oldLotData.forEach(oldLot => {
-        const lotNumber = oldLot['Lot Number'];
-        if (lotNumber && !processedLots.has(lotNumber)) {
-          processedLots.add(lotNumber);
-          const dispatchedQty = dispatchedMap.get(lotNumber) || 0;
-          
-          summary.push({
-            lotNumber: lotNumber,
-            totalPieces: 0,
-            dispatchedQty: dispatchedQty,
-            pendingPieces: Infinity,
-            availablePieces: Infinity,
-            status: 'OLD STOCK',
-            isOldLot: true
-          });
-          
-          addDebugMessage(`OLD LOT ${lotNumber}: Unlimited stock, Dispatched: ${dispatchedQty}`, 'success');
-        }
-      });
+      const isOldLot = product['Source'] === 'OLD LOT';
+      const dispatchedQty = dispatchedMap.get(lotNumber) || 0;
+      const availablePieces = isOldLot ? Infinity : Math.max(0, totalPieces - dispatchedQty);
       
-      // Process regular lots
-      addDebugMessage(`Processing ${sheetData.length} regular lots...`, 'info');
-      sheetData.forEach(product => {
-        const lotNumber = product['Lot Number'];
-        if (lotNumber && !processedLots.has(lotNumber)) {
-          processedLots.add(lotNumber);
-          
-          let totalPieces = product['Total Pieces'];
-          if (!totalPieces || totalPieces === 0) {
-            const piecesPerSet = parseInt(product['Pieces Per Set']) || 0;
-            const numberOfSets = parseInt(product['Number of Sets']) || parseInt(product['Total Sets']) || 0;
-            totalPieces = piecesPerSet * numberOfSets;
-          }
-          totalPieces = Number(totalPieces) || 0;
-          
-          const dispatchedQty = dispatchedMap.get(lotNumber) || 0;
-          const availablePieces = Math.max(0, totalPieces - dispatchedQty);
-          
-          let status = 'PENDING';
-          if (totalPieces > 0) {
-            if (availablePieces <= 0) status = 'COMPLETED';
-            else if (dispatchedQty > 0) status = 'PARTIAL';
-          }
-          
-          summary.push({
-            lotNumber: lotNumber,
-            totalPieces: totalPieces,
-            dispatchedQty: dispatchedQty,
-            pendingPieces: totalPieces - dispatchedQty,
-            availablePieces: availablePieces,
-            status: status,
-            isOldLot: false
-          });
-          
-          addDebugMessage(`Regular lot ${lotNumber}: Total=${totalPieces}, Dispatched=${dispatchedQty}, Available=${availablePieces}`, 'info');
-        }
-      });
-      
-      for (const [lotNumber, dispatchedQty] of dispatchedMap) {
-        if (!processedLots.has(lotNumber)) {
-          summary.push({
-            lotNumber: lotNumber,
-            totalPieces: 0,
-            dispatchedQty: dispatchedQty,
-            pendingPieces: 0,
-            availablePieces: 0,
-            status: 'COMPLETED',
-            isOldLot: false
-          });
-        }
+      let status = 'PENDING';
+      if (isOldLot) {
+        status = 'OLD STOCK';
+      } else if (totalPieces > 0) {
+        if (availablePieces <= 0) status = 'COMPLETED';
+        else if (dispatchedQty > 0) status = 'PARTIAL';
       }
       
-      const statusOrder = { 'OLD STOCK': 0, 'PENDING': 1, 'PARTIAL': 2, 'COMPLETED': 3 };
-      summary.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+      summary.push({
+        lotNumber: lotNumber,
+        totalPieces: totalPieces,
+        dispatchedQty: dispatchedQty,
+        pendingPieces: isOldLot ? 0 : Math.max(0, totalPieces - dispatchedQty),
+        availablePieces: availablePieces,
+        status: status,
+        isOldLot: isOldLot,
+        itemName: product['Garment Type'] || product['Item Name'] || '',
+        brand: product['Party Name'] || product['Brand'] || ''
+      });
       
-      setLotSummary(summary);
-      addDebugMessage(`Loaded summary for ${summary.length} lots (${summary.filter(l => l.isOldLot).length} old lots)`, 'success');
-      
-    } catch (error) {
-      console.error("Error fetching lot summary:", error);
-      addDebugMessage(`Failed to load lot summary: ${error.message}`, 'error');
-    } finally {
-      setLoadingLotSummary(false);
+      addDebugMessage(`Lot ${lotNumber}: Total=${totalPieces}, Dispatched=${dispatchedQty}, Available=${availablePieces === Infinity ? '∞' : availablePieces}, Status=${status}`, 'info');
+    });
+    
+    // SECOND: Add any lots that appear only in dispatches (not in product database)
+    for (const [lotNumber, dispatchedQty] of dispatchedMap) {
+      if (!processedLots.has(lotNumber)) {
+        summary.push({
+          lotNumber: lotNumber,
+          totalPieces: 0,
+          dispatchedQty: dispatchedQty,
+          pendingPieces: 0,
+          availablePieces: 0,
+          status: 'COMPLETED',
+          isOldLot: false,
+          itemName: 'Unknown',
+          brand: 'Unknown'
+        });
+        addDebugMessage(`Dispatch-only lot ${lotNumber}: Dispatched=${dispatchedQty}`, 'info');
+      }
     }
-  };
-
+    
+    // Sort summary: OLD STOCK first, then PENDING, PARTIAL, COMPLETED
+    const statusOrder = { 'OLD STOCK': 0, 'PENDING': 1, 'PARTIAL': 2, 'COMPLETED': 3 };
+    summary.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+    
+    setLotSummary(summary);
+    addDebugMessage(`✅ Loaded summary for ${summary.length} lots (${summary.filter(l => l.isOldLot).length} old lots, ${summary.filter(l => l.totalPieces === 0 && !l.isOldLot).length} new/dispatch-only lots)`, 'success');
+    
+  } catch (error) {
+    console.error("Error fetching lot summary:", error);
+    addDebugMessage(`Failed to load lot summary: ${error.message}`, 'error');
+  } finally {
+    setLoadingLotSummary(false);
+  }
+};
   const fetchLotSummary = async () => {
     const allData = [...sheetData, ...oldLotData];
     await fetchLotSummaryWithData(allData);
@@ -714,6 +953,7 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
       }
       
       setOldLotData(oldLotDataArray);
+      debugOldLotData();
       return oldLotDataArray;
       
     } catch (error) {
@@ -723,167 +963,225 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     }
   };
 
-  const parseOldLotSheetData = (values) => {
-    if (!values || values.length < 2) return [];
+ const parseOldLotSheetData = (values) => {
+  if (!values || values.length < 2) return [];
+  
+  const headers = values[0];
+  addDebugMessage(`OLD LOT sheet headers: ${headers.join(', ')}`, 'info');
+  
+  const rows = values.slice(1);
+  const parsedProducts = [];
+  
+  rows.forEach((row, idx) => {
+    let combinedData = row[0] || '';
+    if (!combinedData) return;
     
-    const headers = values[0];
-    addDebugMessage(`OLD LOT sheet headers: ${headers.join(', ')}`, 'info');
+    let lotNumber = '';
+    let remainingDescription = combinedData;
     
-    const rows = values.slice(1);
-    const parsedProducts = [];
+    // Try to extract lot number from the beginning of the string
+    // Pattern matches: J001-J002, JN-105, L-1101, etc.
+    const lotMatch = combinedData.match(/^([A-Z0-9\-/]+)\s+(.+)$/);
     
-    const lotNumberColIndex = headers.findIndex(h => 
-      h && (h.toLowerCase().includes('lot') || h.toLowerCase().includes('number'))
-    );
-    const fullDescriptionColIndex = headers.findIndex(h => 
-      h && (h.toLowerCase().includes('description') || h.toLowerCase().includes('item') || h.toLowerCase().includes('product'))
-    );
-    
-    addDebugMessage(`Lot Number column index: ${lotNumberColIndex}, Description column index: ${fullDescriptionColIndex}`, 'info');
-    
-    rows.forEach((row, idx) => {
-      let combinedData = row[0] || '';
-      let lotNumber = '';
-      
-      if (lotNumberColIndex !== -1 && row[lotNumberColIndex]) {
-        lotNumber = row[lotNumberColIndex].toString().trim();
-        combinedData = row[fullDescriptionColIndex !== -1 ? fullDescriptionColIndex : 0] || '';
+    if (lotMatch) {
+      lotNumber = lotMatch[1].trim();
+      remainingDescription = lotMatch[2].trim();
+      addDebugMessage(`Extracted lot: "${lotNumber}" from "${combinedData}"`, 'info');
+    } else {
+      // If no match, try to get first word as lot number
+      const firstWord = combinedData.split(/\s+/)[0];
+      if (firstWord && /[A-Z0-9\-/]/.test(firstWord)) {
+        lotNumber = firstWord;
+        remainingDescription = combinedData.substring(firstWord.length).trim();
+        addDebugMessage(`Alternative extraction - Lot: "${lotNumber}", Desc: "${remainingDescription}"`, 'info');
       } else {
-        const match = combinedData.match(/^(\d+)/);
-        if (match) {
-          lotNumber = match[1];
+        // Skip if no lot number found
+        addDebugMessage(`Could not extract lot number from: "${combinedData}"`, 'warning');
+        return;
+      }
+    }
+    
+    if (!lotNumber) return;
+    
+    // Parse the description to extract item name, brand, and pieces per set
+    let itemName = '';
+    let brand = '';
+    let piecesPerSet = 0;
+    
+    if (remainingDescription) {
+      // Extract pieces per set (e.g., "5S" at the end)
+      const pcsMatch = remainingDescription.match(/(\d+)\s*[Ss]$/);
+      if (pcsMatch) {
+        piecesPerSet = parseInt(pcsMatch[1], 10);
+        remainingDescription = remainingDescription.replace(/\s*\d+\s*[Ss]$/, '').trim();
+      }
+      
+      // Split description into words
+      const words = remainingDescription.split(/\s+/);
+      
+      // Known brand indicators
+      const brandIndicators = [
+        'ADIDAS', 'NIKE', 'PUMA', 'REEBOK', 'UNDERARMOUR', 'GUCCI', 'LOUISVUITTON',
+        'BALENCIAGA', 'ESSENTIALS', 'AMIRI', 'OFFWHITE', 'DIESEL', 'H&M', 'ZARA',
+        'GIRLISH', 'R.L.POLO', 'LACOSTE', 'BROOKSBROTHERS', 'POLO', 'TOMMY', 'CALVINKLEIN'
+      ];
+      
+      let brandIndex = -1;
+      for (let i = 0; i < words.length; i++) {
+        const cleanWord = words[i].toUpperCase().replace(/[.,!?;:()]/g, '');
+        if (brandIndicators.includes(cleanWord)) {
+          brandIndex = i;
+          brand = words[i];
+          break;
         }
       }
       
-      if (!lotNumber) return;
-      
-      let itemName = '';
-      let brand = '';
-      let piecesPerSet = 0;
-      
-      if (combinedData) {
-        let description = combinedData.replace(/^\d+\s*/, '').trim();
-        
-        const pcsMatch = description.match(/(\d+)\s*[Ss]?$/);
-        if (pcsMatch) {
-          piecesPerSet = parseInt(pcsMatch[1], 10);
-          description = description.replace(/\s*\d+\s*[Ss]?$/, '').trim();
-        }
-        
-        const words = description.split(/\s+/);
-        const brandIndicators = ['EDGE', 'GENTS', 'CLASSIC', 'PREMIUM', 'BASIC', 'PRO'];
-        let brandIndex = -1;
-        
-        for (let i = 0; i < words.length; i++) {
-          if (brandIndicators.includes(words[i].toUpperCase())) {
-            brandIndex = i;
-            break;
+      if (brandIndex !== -1) {
+        // Remove brand from words array
+        words.splice(brandIndex, 1);
+        itemName = words.join(' ').trim();
+      } else {
+        // If no brand found, check for gender indicators
+        const genderMatch = remainingDescription.match(/(GENTS|LADIES|KIDS|UNISEX|GIRLISH|BOYS|GIRLS)/i);
+        if (genderMatch) {
+          const genderIndex = remainingDescription.toLowerCase().indexOf(genderMatch[0].toLowerCase());
+          itemName = remainingDescription.substring(0, genderIndex).trim();
+          const afterGender = remainingDescription.substring(genderIndex + genderMatch[0].length).trim();
+          if (afterGender && !brand) {
+            const genderBrandMatch = afterGender.match(/^([A-Z][A-Za-z0-9&.\s]+?)(?:\s|$)/);
+            if (genderBrandMatch && !brandIndicators.includes(genderBrandMatch[1].toUpperCase())) {
+              brand = genderBrandMatch[1];
+            }
           }
-        }
-        
-        if (brandIndex !== -1) {
-          brand = words[brandIndex];
-          words.splice(brandIndex, 1);
-          itemName = words.join(' ').trim();
         } else {
-          itemName = description;
-          brand = '';
+          itemName = remainingDescription;
         }
-        
-        itemName = itemName.replace(/\s+/g, ' ').trim();
       }
       
-      if (!itemName) {
-        itemName = combinedData || `Lot ${lotNumber}`;
+      // Clean up item name
+      itemName = itemName.replace(/\s+/g, ' ').trim();
+      if (!itemName && remainingDescription) {
+        itemName = remainingDescription;
       }
-      
-      parsedProducts.push({
-        'Lot Number': lotNumber,
-        'Barcode ID': `LOT-${lotNumber}`,
-        'Brand': brand,
-        'Item Name': itemName,
-        'Garment Type': itemName,
-        'Pieces Per Set': piecesPerSet,
-        'Number of Sets': 1,
-        'Total Pieces': 0,
-        'Party Name': brand || 'OLD STOCK',
-        'Colors': [],
-        'Sizes': [],
-        'Status': 'Available',
-        'Quality Status': 'Passed',
-        'Source': 'OLD LOT'
-      });
-      
-      addDebugMessage(`Parsed OLD LOT: ${lotNumber} -> Item: ${itemName}, Brand: ${brand}, Pc/Set: ${piecesPerSet}`, 'success');
+    }
+    
+    // Ensure we have values
+    if (!itemName) {
+      itemName = `Lot ${lotNumber}`;
+    }
+    if (!brand) {
+      brand = 'OLD STOCK';
+    }
+    if (piecesPerSet === 0) {
+      piecesPerSet = 5; // Default to 5 as seen in your data
+    }
+    
+    parsedProducts.push({
+      'Lot Number': lotNumber,
+      'Barcode ID': `LOT-${lotNumber}`,
+      'Brand': brand,
+      'Item Name': itemName,
+      'Garment Type': itemName,
+      'Pieces Per Set': piecesPerSet,
+      'Number of Sets': 1,
+      'Total Pieces': 0,
+      'Party Name': brand,
+      'Colors': [],
+      'Sizes': [],
+      'Status': 'Available',
+      'Quality Status': 'Passed',
+      'Source': 'OLD LOT',
+      'Raw Description': combinedData // Keep for debugging
     });
     
-    return parsedProducts;
-  };
+    addDebugMessage(`Parsed OLD LOT: ${lotNumber} -> Item: "${itemName}", Brand: "${brand}", Pc/Set: ${piecesPerSet}`, 'success');
+  });
+  
+  addDebugMessage(`Total OLD LOT products parsed: ${parsedProducts.length}`, 'success');
+  return parsedProducts;
+};
 
   const fetchGoogleSheetData = async () => {
-    setLoading(true);
-    setDataLoadError(false);
-    addDebugMessage("Fetching product database...");
+  setLoading(true);
+  setDataLoadError(false);
+  addDebugMessage("Fetching product database...");
+  
+  try {
+    let data = null;
+    
+    const API_KEY = "AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk";
+    const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
     
     try {
-      let data = null;
-      
-      const API_KEY = "AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk";
-      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
-      
-      try {
-        const response = await fetch(apiUrl);
-        if (response.ok) {
-          const result = await response.json();
-          if (result.values && result.values.length > 1) {
-            data = parseSheetData(result.values);
-            addDebugMessage(`Loaded ${data.length} products from API`);
-          }
-        }
-      } catch (apiError) {
-        addDebugMessage(`API failed: ${apiError.message}`, 'error');
-      }
-      
-      if (!data) {
-        const csvUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
-        const csvResponse = await fetch(csvUrl);
-        
-        if (csvResponse.ok) {
-          const csvText = await csvResponse.text();
-          data = parseCSV(csvText);
-          addDebugMessage(`Loaded ${data.length} products from CSV`);
+      const response = await fetch(apiUrl);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.values && result.values.length > 1) {
+          data = parseSheetData(result.values);
+          addDebugMessage(`Loaded ${data.length} products from API`);
         }
       }
-      
-      if (!data || data.length === 0) {
-        addDebugMessage("Using mock data", 'warning');
-        data = getMockData();
-        showToast("Using demo data. Could not connect to Google Sheets.", "warning");
-      }
-      
-      setSheetData(data);
-      
-      const oldLotProducts = await fetchOldLotData();
-      
-      const allData = [...data, ...oldLotProducts];
-      showToast(`Loaded ${data.length} products + ${oldLotProducts.length} old lots = ${allData.length} total`, "success");
-      
-      await fetchLotSummaryWithData(allData);
-      
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      const mockData = getMockData();
-      setSheetData(mockData);
-      setDataLoadError(true);
-      showToast("Using demo data", "warning");
-      
-      const oldLotProducts = await fetchOldLotData();
-      const allData = [...mockData, ...oldLotProducts];
-      await fetchLotSummaryWithData(allData);
-    } finally {
-      setLoading(false);
+    } catch (apiError) {
+      addDebugMessage(`API failed: ${apiError.message}`, 'error');
     }
-  };
+    
+    if (!data) {
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+      const csvResponse = await fetch(csvUrl);
+      
+      if (csvResponse.ok) {
+        const csvText = await csvResponse.text();
+        data = parseCSV(csvText);
+        addDebugMessage(`Loaded ${data.length} products from CSV`);
+      }
+    }
+    
+    if (!data || data.length === 0) {
+      addDebugMessage("Using mock data", 'warning');
+      data = getMockData();
+      showToast("Using demo data. Could not connect to Google Sheets.", "warning");
+    }
+    
+    setSheetData(data);
+    
+    // Fetch old lot data
+    const oldLotProducts = await fetchOldLotData();
+    addDebugMessage(`Loaded ${oldLotProducts.length} products from OLD LOT sheet`, 'success');
+    
+    const allData = [...data, ...oldLotProducts];
+    showToast(`Loaded ${data.length} products + ${oldLotProducts.length} old lots = ${allData.length} total`, "success");
+    
+    await fetchLotSummaryWithData(allData);
+    
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    const mockData = getMockData();
+    setSheetData(mockData);
+    setDataLoadError(true);
+    showToast("Using demo data", "warning");
+    
+    const oldLotProducts = await fetchOldLotData();
+    const allData = [...mockData, ...oldLotProducts];
+    await fetchLotSummaryWithData(allData);
+  } finally {
+    setLoading(false);
+  }
+};
+// Add this function to debug old lot data
+const debugOldLotData = () => {
+  console.log("Old Lot Data:", oldLotData);
+  console.log("Old Lot Count:", oldLotData.length);
+  oldLotData.forEach(lot => {
+    console.log(`Lot: ${lot['Lot Number']}, Description: ${lot['Garment Type'] || lot['Item Name']}, Brand: ${lot['Party Name'] || lot['Brand']}`);
+  });
+  addDebugMessage(`Debug: ${oldLotData.length} old lots loaded`, 'info');
+  
+  // Log first 5 lots for inspection
+  const firstFive = oldLotData.slice(0, 5);
+  firstFive.forEach(lot => {
+    addDebugMessage(`Old lot example: ${lot['Lot Number']} - ${lot['Garment Type'] || lot['Item Name']}`, 'info');
+  });
+};
 
   const parseSheetData = (values) => {
     if (!values || values.length < 2) return [];
@@ -977,6 +1275,120 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     
     return product;
   };
+  // Packing Materials Modal Component
+const PackingMaterialsModal = () => {
+  const [localMaterials, setLocalMaterials] = useState({
+    totalBoxes: packingMaterials.totalBoxes,
+    totalBags: packingMaterials.totalBags,
+    totalPolybags: packingMaterials.totalPolybags
+  });
+
+  const handleConfirm = () => {
+    // Update the parent state first
+    setPackingMaterials(localMaterials);
+    // Close modal
+    setIsPackingMaterialsModalOpen(false);
+    // Call final submission after a small delay to ensure state is updated
+    setTimeout(() => {
+      handleFinalSubmissionWithMaterials(localMaterials);
+    }, 100);
+  };
+
+  return (
+    <div className="blue-modal-overlay" onClick={() => setIsPackingMaterialsModalOpen(false)}>
+      <div className="blue-modal blue-modal-medium" onClick={(e) => e.stopPropagation()}>
+        <div className="blue-modal-header">
+          <div className="blue-modal-header-left">
+            <span className="blue-modal-icon">📦</span>
+            <h3>Packing Materials</h3>
+            <span className="blue-modal-badge">Final Submission</span>
+          </div>
+          <button className="blue-modal-close" onClick={() => setIsPackingMaterialsModalOpen(false)}>✕</button>
+        </div>
+        
+        <div className="blue-modal-body">
+          <div className="blue-info-message" style={{ 
+            backgroundColor: '#e8f0fe', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '20px',
+            fontSize: '13px'
+          }}>
+            <span style={{ fontSize: '18px', marginRight: '8px' }}>ℹ️</span>
+            Please enter the packing materials details for this dispatch
+          </div>
+
+          <div className="blue-form-field">
+            <label>📦 Total Boxes</label>
+            <input 
+              type="number" 
+              value={localMaterials.totalBoxes} 
+              onChange={(e) => setLocalMaterials({ ...localMaterials, totalBoxes: parseInt(e.target.value) || 0 })} 
+              className="blue-input" 
+              placeholder="Enter number of boxes"
+              autoFocus
+              min="0"
+            />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>🛍️ Total Bags</label>
+            <input 
+              type="number" 
+              value={localMaterials.totalBags} 
+              onChange={(e) => setLocalMaterials({ ...localMaterials, totalBags: parseInt(e.target.value) || 0 })} 
+              className="blue-input" 
+              placeholder="Enter number of bags"
+              min="0"
+            />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>📎 Total Polythene Bags</label>
+            <input 
+              type="number" 
+              value={localMaterials.totalPolybags} 
+              onChange={(e) => setLocalMaterials({ ...localMaterials, totalPolybags: parseInt(e.target.value) || 0 })} 
+              className="blue-input" 
+              placeholder="Enter number of polythene bags"
+              min="0"
+            />
+          </div>
+
+          <div className="blue-summary-box" style={{
+            marginTop: '20px',
+            padding: '15px',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '8px',
+            border: '1px solid #dee2e6'
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Summary</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+              <span>Total Items:</span>
+              <strong>{tempBillData?.items.length || 0}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginTop: '5px' }}>
+              <span>Total Quantity:</span>
+              <strong>{tempBillData?.items.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0} PCS</strong>
+            </div>
+          </div>
+        </div>
+        
+        <div className="blue-modal-footer">
+          <button onClick={() => setIsPackingMaterialsModalOpen(false)} className="blue-btn blue-btn-secondary">
+            Cancel
+          </button>
+          <button 
+            onClick={handleConfirm} 
+            className="blue-btn blue-btn-primary blue-btn-large"
+          >
+            ✅ Confirm & Generate PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
   const calculateTotalQuantity = (sets, setsPerPcs, loosePcs, looseOperation = "add") => {
     const setsNum = parseInt(sets) || 0;
@@ -1152,18 +1564,18 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     setTimeout(() => setLastScannedBarcode(""), 2000);
   };
 
-  const handleKeyboardKeyPress = (key) => {
-    if (key === 'CLEAR') {
-      setManualLotInput('');
-      setLotSearchTerm('');
-    } else if (key === '⌫') {
-      setManualLotInput(prev => prev.slice(0, -1));
-      setLotSearchTerm(prev => prev.slice(0, -1));
-    } else {
-      setManualLotInput(prev => prev + key);
-      setLotSearchTerm(prev => prev + key);
-    }
-  };
+ const handleKeyboardKeyPress = (key) => {
+  if (key === 'CLEAR') {
+    setManualLotInput('');
+    setLotSearchTerm('');
+  } else if (key === '⌫') {
+    setManualLotInput(prev => prev.slice(0, -1));
+    setLotSearchTerm(prev => prev.slice(0, -1));
+  } else {
+    setManualLotInput(prev => prev + key);
+    setLotSearchTerm(prev => prev + key);
+  }
+};
 
   const handleKeyboardSubmit = () => {
     handleManualLotSearch();
@@ -1475,374 +1887,381 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     setTimeout(() => toast.remove(), 3000);
   };
   
-  const generatePackingList = async (packingData) => {
-    if (!packingData || !packingData.items || packingData.items.length === 0) {
-      console.error("Invalid packing data");
-      setGeneratingPDF(false);
-      setProcessingStage(null);
-      return false;
-    }
+ const generatePackingList = async (packingData) => {
+  if (!packingData || !packingData.items || packingData.items.length === 0) {
+    console.error("Invalid packing data");
+    setGeneratingPDF(false);
+    setProcessingStage(null);
+    return false;
+  }
 
-    setGeneratingPDF(true);
-    setProcessingStage('pdf');
-    
-    try {
-      const documentTypes = [
-        { name: "Customer", subheading: "PACKING LIST FOR CUSTOMER" },
-        { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" },
-        { name: "Audit", subheading: "PACKING LIST FOR AUDIT" }
-      ];
+  setGeneratingPDF(true);
+  setProcessingStage('pdf');
+  
+  try {
+    const documentTypes = [
+      { name: "Customer", subheading: "PACKING LIST FOR CUSTOMER" },
+      { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" },
+      { name: "Audit", subheading: "PACKING LIST FOR AUDIT" }
+    ];
 
-      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const leftMargin = 15;
-      const rightMargin = 15;
-      const contentWidth = pageWidth - leftMargin - rightMargin;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const leftMargin = 15;
+    const rightMargin = 15;
+    const contentWidth = pageWidth - leftMargin - rightMargin;
 
-      const uniqueLots = new Set(packingData.items.map(item => item.lotNumber)).size;
-      const totalItems = packingData.items.length;
-      const totalQuantity = packingData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-      const totalSets = packingData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
+    const uniqueLots = new Set(packingData.items.map(item => item.lotNumber)).size;
+    const totalItems = packingData.items.length;
+    const totalQuantity = packingData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const totalSets = packingData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
 
-      const MAX_ROWS_PER_PAGE = 14;
+    const MAX_ROWS_PER_PAGE = 14;
 
-      const drawPageBorder = () => {
-        doc.setLineWidth(0.5);
-        doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
-        doc.setLineWidth(0.3);
-      };
+    const drawPageBorder = () => {
+      doc.setLineWidth(0.5);
+      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+      doc.setLineWidth(0.3);
+    };
 
-      const drawHeader = (docType, yPos) => {
-        doc.setFont("times", "bold");
-        doc.setFontSize(22);
-        doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
-        yPos += 8;
+    const drawHeader = (docType, yPos) => {
+      doc.setFont("times", "bold");
+      doc.setFontSize(22);
+      doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
+      yPos += 8;
+      
+      doc.setFontSize(14);
+      doc.setFont("times", "bold");
+      doc.setTextColor(70, 70, 200);
+      doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
+      doc.setTextColor(0, 0, 0);
+      yPos += 12;
+
+      doc.rect(leftMargin, yPos, contentWidth, 50);
+      
+      const midPoint = leftMargin + (contentWidth * 0.6);
+      doc.line(midPoint, yPos, midPoint, yPos + 50);
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      doc.text(`Date :-  ${packingData.billDate || new Date().toLocaleDateString()}`, leftMargin + 3, yPos + 7);
+      doc.text(`Order Reference :-  ${packingData.orderReference || 'N/A'}`, leftMargin + 3, yPos + 15);
+      doc.text(`Bill to :-  ${packingData.partyName || 'N/A'}`, leftMargin + 3, yPos + 23);
+      doc.text(`Document No :-  ${packingData.packingNumber || 'N/A'}`, leftMargin + 3, yPos + 31);
+       doc.text(`Packing Materials :-`, midPoint + 3, yPos + 39);
+      const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
+      const materialsText = `${packingMaterials.totalBoxes || 0} Boxes, ${packingMaterials.totalBags || 0} Bags, ${packingMaterials.totalPolybags || 0} Polybags`;
+      doc.text(materialsText, midPoint + 35, yPos + 39);
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      
+      doc.text(`Total Lots :-`, midPoint + 3, yPos + 7);
+      doc.text(uniqueLots.toString(), midPoint + 35, yPos + 7);
+      
+      doc.text(`Total Items :-`, midPoint + 3, yPos + 15);
+      doc.text(totalItems.toString(), midPoint + 35, yPos + 15);
+      
+      doc.text(`Total Qty :-`, midPoint + 3, yPos + 23);
+      doc.text(totalQuantity.toString(), midPoint + 35, yPos + 23);
+      
+      doc.text(`Total Sets :-`, midPoint + 3, yPos + 31);
+      doc.text(totalSets.toString(), midPoint + 35, yPos + 31);
+      
+      // Add packing materials information
+     
+      
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated by: ${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, leftMargin + 3, yPos + 46);
+      doc.setTextColor(0, 0, 0);
+
+      return yPos + 60;
+    };
+
+    const drawTableHeader = (yPos, docType) => {
+      let tableColumns;
+      
+      if (docType.name === "Account") {
+        tableColumns = [
+          { header: "S.No", width: 10 },
+          { header: "Lot Number", width: 20 },
+          { header: "Brand", width: 25 },
+          { header: "Description", width: 45 },
+          { header: "Sets", width: 17 },
+          { header: "Pc/Set", width: 17 },
+          { header: "Loose Pc", width: 17 },
+          { header: "Total Qty", width: 20 },
+          { header: "✓", width: 8 }
+        ];
+      } else {
+        tableColumns = [
+          { header: "S.No", width: 10 },
+          { header: "Lot Number", width: 20 },
+          { header: "Brand", width: 25 },
+          { header: "Description", width: 50 },
+          { header: "Sets", width: 17 },
+          { header: "Pc/Set", width: 17 },
+          { header: "Loose Pc", width: 17 },
+          { header: "Total Qty", width: 23 }
+        ];
+      }
+
+      doc.setFont("times", "bold");
+      doc.setFillColor(240, 240, 240);
+      doc.rect(leftMargin, yPos, contentWidth, 10, 'F');
+      doc.rect(leftMargin, yPos, contentWidth, 10);
+      
+      let currentX = leftMargin;
+      tableColumns.forEach(col => {
+        const textWidth = doc.getTextWidth(col.header);
+        const textX = currentX + (col.width / 2) - (textWidth / 2);
+        doc.text(col.header, textX, yPos + 7);
+        currentX += col.width;
+        if (currentX < pageWidth - rightMargin) {
+          doc.line(currentX, yPos, currentX, yPos + 10);
+        }
+      });
+      
+      return yPos + 10;
+    };
+
+    const drawCheckbox = (x, y, size = 3) => {
+      doc.rect(x, y, size, size);
+    };
+
+    const drawTableRow = (item, index, yPos, docType) => {
+      let tableColumns;
+      
+      if (docType.name === "Account") {
+        tableColumns = [
+          { width: 10 }, { width: 20 }, { width: 25 }, { width: 45 },
+          { width: 17 }, { width: 17 }, { width: 17 }, { width: 20 }, { width: 8 }
+        ];
+      } else {
+        tableColumns = [
+          { width: 10 }, { width: 20 }, { width: 25 }, { width: 50 },
+          { width: 17 }, { width: 17 }, { width: 17 }, { width: 23 }
+        ];
+      }
+      
+      const rowHeight = 10;
+
+      doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+      
+      let colX = leftMargin;
+      tableColumns.forEach(col => {
+        colX += col.width;
+        if (colX < pageWidth - rightMargin) {
+          doc.line(colX, yPos, colX, yPos + rowHeight);
+        }
+      });
+
+      let values;
+      if (docType.name === "Account") {
+        values = [
+          (index + 1).toString(),
+          item.lotNumber || "",
+          item.brand || "",
+          (() => {
+            let description = item.description || "";
+            const maxChars = 27;
+            if (description.length > maxChars) {
+              description = description.substring(0, maxChars - 3) + "...";
+            }
+            return description;
+          })(),
+          (item.sets || 0).toString(),
+          (item.setsPerPcs || 0).toString(),
+          (item.loosePcs || 0).toString(),
+          (item.quantity || 0).toString(),
+          ""
+        ];
+      } else {
+        values = [
+          (index + 1).toString(),
+          item.lotNumber || "",
+          item.brand || "",
+          (() => {
+            let description = item.description || "";
+            const maxChars = 35;
+            if (description.length > maxChars) {
+              description = description.substring(0, maxChars - 3) + "...";
+            }
+            return description;
+          })(),
+          (item.sets || 0).toString(),
+          (item.setsPerPcs || 0).toString(),
+          (item.loosePcs || 0).toString(),
+          (item.quantity || 0).toString()
+        ];
+      }
+
+      let textX = leftMargin;
+      values.forEach((value, colIndex) => {
+        const textWidth = doc.getTextWidth(value);
+        const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
         
-        doc.setFontSize(14);
-        doc.setFont("times", "bold");
-        doc.setTextColor(70, 70, 200);
-        doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
-        doc.setTextColor(0, 0, 0);
-        yPos += 12;
+        if (colIndex === tableColumns.length - 1 && docType.name === "Account") {
+          const checkboxX = textX + (tableColumns[colIndex].width / 2) - 2;
+          const checkboxY = yPos + (rowHeight / 2) - 2;
+          drawCheckbox(checkboxX, checkboxY, 4);
+        } else {
+          doc.text(value, textXPos, yPos + 8);
+        }
+        
+        textX += tableColumns[colIndex].width;
+      });
 
-        doc.rect(leftMargin, yPos, contentWidth, 40);
-        
-        const midPoint = leftMargin + (contentWidth * 0.6);
-        doc.line(midPoint, yPos, midPoint, yPos + 40);
+      return rowHeight;
+    };
 
-        doc.setFont("times", "bold");
-        doc.setFontSize(10);
-        doc.text(`Date :-  ${packingData.billDate || new Date().toLocaleDateString()}`, leftMargin + 3, yPos + 7);
-        doc.text(`Order Reference :-  ${packingData.orderReference || 'N/A'}`, leftMargin + 3, yPos + 15);
-        doc.text(`Bill to :-  ${packingData.partyName || 'N/A'}`, leftMargin + 3, yPos + 23);
-        doc.text(`Document No :-  ${packingData.packingNumber || 'N/A'}`, leftMargin + 3, yPos + 31);
-
-        doc.setFont("times", "bold");
-        doc.setFontSize(10);
-        
-        doc.text(`Total Lots :-`, midPoint + 3, yPos + 7);
-        doc.text(uniqueLots.toString(), midPoint + 35, yPos + 7);
-        
-        doc.text(`Total Items :-`, midPoint + 3, yPos + 15);
-        doc.text(totalItems.toString(), midPoint + 35, yPos + 15);
-        
-        doc.text(`Total Qty :-`, midPoint + 3, yPos + 23);
-        doc.text(totalQuantity.toString(), midPoint + 35, yPos + 23);
-        
-        doc.text(`Total Sets :-`, midPoint + 3, yPos + 31);
-        doc.text(totalSets.toString(), midPoint + 35, yPos + 31);
-        
+    const drawTableFooter = (yPos, isLastPage, docType) => {
+      yPos += 5;
+      
+      doc.setLineWidth(0.5);
+      doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
+      
+      if (isLastPage && docType.name === "Account") {
         doc.setFontSize(8);
         doc.setTextColor(100, 100, 100);
-        doc.text(`Generated by: ${preparedBy} (${userRole})`, leftMargin + 3, yPos + 38);
+        doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 6);
         doc.setTextColor(0, 0, 0);
+      }
+      
+      return yPos + 15;
+    };
 
-        return yPos + 50;
-      };
+    const drawSignatures = (docType, yPos) => {
+      const footerY = pageHeight - 20;
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
+      
+      doc.setLineWidth(0.3);
+      
+      const sectionWidth = (contentWidth - 20) / 4;
+      let currentX = leftMargin;
+      
+      doc.text("Prepared By", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(7);
+      doc.text(`${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, currentX + 5, footerY + 8);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Account Officer", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(7);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Checked By", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(7);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Authorized Signatory", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
+      doc.setFontSize(7);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 8);
+      doc.setTextColor(0, 0, 0);
+      
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      if (docType.name === "Account") {
+        doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 15, { align: "center" });
+      } else if (docType.name === "Audit") {
+        doc.text("Audit reference document", pageWidth / 2, footerY - 15, { align: "center" });
+      } else if (docType.name === "Customer") {
+        doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 15, { align: "center" });
+      }
+      doc.setTextColor(0, 0, 0);
+    };
 
-      const drawTableHeader = (yPos, docType) => {
-        let tableColumns;
+    for (let docIndex = 0; docIndex < documentTypes.length; docIndex++) {
+      const docType = documentTypes[docIndex];
+      let itemsProcessed = 0;
+      let sectionPageCount = 0;
+      
+      while (itemsProcessed < packingData.items.length) {
+        const remainingRows = packingData.items.length - itemsProcessed;
+        const rowsOnThisPage = Math.min(MAX_ROWS_PER_PAGE, remainingRows);
+        const isLastPageOfSection = (itemsProcessed + rowsOnThisPage) === packingData.items.length;
         
-        if (docType.name === "Account") {
-          tableColumns = [
-            { header: "S.No", width: 10 },
-            { header: "Lot Number", width: 20 },
-            { header: "Brand", width: 25 },
-            { header: "Description", width: 45 },
-            { header: "Sets", width: 17 },
-            { header: "Pc/Set", width: 17 },
-            { header: "Loose Pc", width: 17 },
-            { header: "Total Qty", width: 20 },
-            { header: "✓", width: 8 }
-          ];
-        } else {
-          tableColumns = [
-            { header: "S.No", width: 10 },
-            { header: "Lot Number", width: 20 },
-            { header: "Brand", width: 25 },
-            { header: "Description", width: 50 },
-            { header: "Sets", width: 17 },
-            { header: "Pc/Set", width: 17 },
-            { header: "Loose Pc", width: 17 },
-            { header: "Total Qty", width: 23 }
-          ];
+        let yPos = 15;
+        
+        if (sectionPageCount > 0) {
+          doc.addPage();
+        } else if (docIndex > 0 && sectionPageCount === 0) {
+          doc.addPage();
         }
-
-        doc.setFont("times", "bold");
-        doc.setFillColor(240, 240, 240);
-        doc.rect(leftMargin, yPos, contentWidth, 10, 'F');
-        doc.rect(leftMargin, yPos, contentWidth, 10);
         
-        let currentX = leftMargin;
-        tableColumns.forEach(col => {
-          const textWidth = doc.getTextWidth(col.header);
-          const textX = currentX + (col.width / 2) - (textWidth / 2);
-          doc.text(col.header, textX, yPos + 7);
-          currentX += col.width;
-          if (currentX < pageWidth - rightMargin) {
-            doc.line(currentX, yPos, currentX, yPos + 10);
-          }
-        });
+        drawPageBorder();
+        yPos = drawHeader(docType, yPos);
+        yPos = drawTableHeader(yPos, docType);
         
-        return yPos + 10;
-      };
-
-      const drawCheckbox = (x, y, size = 3) => {
-        doc.rect(x, y, size, size);
-      };
-
-      const drawTableRow = (item, index, yPos, docType) => {
-        let tableColumns;
-        
-        if (docType.name === "Account") {
-          tableColumns = [
-            { width: 10 }, { width: 20 }, { width: 25 }, { width: 45 },
-            { width: 17 }, { width: 17 }, { width: 17 }, { width: 20 }, { width: 8 }
-          ];
-        } else {
-          tableColumns = [
-            { width: 10 }, { width: 20 }, { width: 25 }, { width: 50 },
-            { width: 17 }, { width: 17 }, { width: 17 }, { width: 23 }
-          ];
+        for (let i = 0; i < rowsOnThisPage; i++) {
+          const item = packingData.items[itemsProcessed];
+          const rowHeight = drawTableRow(item, itemsProcessed, yPos, docType);
+          yPos += rowHeight;
+          itemsProcessed++;
         }
         
-        const rowHeight = 10;
-
-        doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+        yPos = drawTableFooter(yPos, isLastPageOfSection, docType);
         
-        let colX = leftMargin;
-        tableColumns.forEach(col => {
-          colX += col.width;
-          if (colX < pageWidth - rightMargin) {
-            doc.line(colX, yPos, colX, yPos + rowHeight);
-          }
-        });
-
-        let values;
-        if (docType.name === "Account") {
-          values = [
-            (index + 1).toString(),
-            item.lotNumber || "",
-            item.brand || "",
-            (() => {
-              let description = item.description || "";
-              const maxChars = 27;
-              if (description.length > maxChars) {
-                description = description.substring(0, maxChars - 3) + "...";
-              }
-              return description;
-            })(),
-            (item.sets || 0).toString(),
-            (item.setsPerPcs || 0).toString(),
-            (item.loosePcs || 0).toString(),
-            (item.quantity || 0).toString(),
-            ""
-          ];
+        if (isLastPageOfSection) {
+          drawSignatures(docType, yPos);
         } else {
-          values = [
-            (index + 1).toString(),
-            item.lotNumber || "",
-            item.brand || "",
-            (() => {
-              let description = item.description || "";
-              const maxChars = 35;
-              if (description.length > maxChars) {
-                description = description.substring(0, maxChars - 3) + "...";
-              }
-              return description;
-            })(),
-            (item.sets || 0).toString(),
-            (item.setsPerPcs || 0).toString(),
-            (item.loosePcs || 0).toString(),
-            (item.quantity || 0).toString()
-          ];
-        }
-
-        let textX = leftMargin;
-        values.forEach((value, colIndex) => {
-          const textWidth = doc.getTextWidth(value);
-          const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
-          
-          if (colIndex === tableColumns.length - 1 && docType.name === "Account") {
-            const checkboxX = textX + (tableColumns[colIndex].width / 2) - 2;
-            const checkboxY = yPos + (rowHeight / 2) - 2;
-            drawCheckbox(checkboxX, checkboxY, 4);
-          } else {
-            doc.text(value, textXPos, yPos + 8);
-          }
-          
-          textX += tableColumns[colIndex].width;
-        });
-
-        return rowHeight;
-      };
-
-      const drawTableFooter = (yPos, isLastPage, docType) => {
-        yPos += 5;
-        
-        doc.setLineWidth(0.5);
-        doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
-        
-        if (isLastPage && docType.name === "Account") {
+          yPos += 5;
           doc.setFontSize(8);
           doc.setTextColor(100, 100, 100);
-          doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 6);
+          doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
           doc.setTextColor(0, 0, 0);
         }
         
-        return yPos + 15;
-      };
-
-      const drawSignatures = (docType, yPos) => {
-        const footerY = pageHeight - 20;
-        doc.setFont("times", "bold");
-        doc.setFontSize(9);
-        
-        doc.setLineWidth(0.3);
-        
-        const sectionWidth = (contentWidth - 20) / 4;
-        let currentX = leftMargin;
-        
-        doc.text("Prepared By", currentX + 5, footerY);
-        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-        doc.setFontSize(7);
-        doc.text(`${preparedBy} (${userRole})`, currentX + 5, footerY + 8);
-        
-        currentX += sectionWidth;
-        doc.setFontSize(9);
-        doc.text("Account Officer", currentX + 5, footerY);
-        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-        doc.setFontSize(7);
-        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-        
-        currentX += sectionWidth;
-        doc.setFontSize(9);
-        doc.text("Checked By", currentX + 5, footerY);
-        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-        doc.setFontSize(7);
-        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-        
-        currentX += sectionWidth;
-        doc.setFontSize(9);
-        doc.text("Authorized Signatory", currentX + 5, footerY);
-        doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
-        doc.setFontSize(7);
-        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-        
-        doc.setFontSize(7);
-        doc.setTextColor(100, 100, 100);
-        doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 8);
-        doc.setTextColor(0, 0, 0);
-        
-        doc.setFontSize(7);
-        doc.setTextColor(150, 150, 150);
-        if (docType.name === "Account") {
-          doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 15, { align: "center" });
-        } else if (docType.name === "Audit") {
-          doc.text("Audit reference document", pageWidth / 2, footerY - 15, { align: "center" });
-        } else if (docType.name === "Customer") {
-          doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 15, { align: "center" });
-        }
-        doc.setTextColor(0, 0, 0);
-      };
-
-      for (let docIndex = 0; docIndex < documentTypes.length; docIndex++) {
-        const docType = documentTypes[docIndex];
-        let itemsProcessed = 0;
-        let sectionPageCount = 0;
-        
-        while (itemsProcessed < packingData.items.length) {
-          const remainingRows = packingData.items.length - itemsProcessed;
-          const rowsOnThisPage = Math.min(MAX_ROWS_PER_PAGE, remainingRows);
-          const isLastPageOfSection = (itemsProcessed + rowsOnThisPage) === packingData.items.length;
-          
-          let yPos = 15;
-          
-          if (sectionPageCount > 0) {
-            doc.addPage();
-          } else if (docIndex > 0 && sectionPageCount === 0) {
-            doc.addPage();
-          }
-          
-          drawPageBorder();
-          yPos = drawHeader(docType, yPos);
-          yPos = drawTableHeader(yPos, docType);
-          
-          for (let i = 0; i < rowsOnThisPage; i++) {
-            const item = packingData.items[itemsProcessed];
-            const rowHeight = drawTableRow(item, itemsProcessed, yPos, docType);
-            yPos += rowHeight;
-            itemsProcessed++;
-          }
-          
-          yPos = drawTableFooter(yPos, isLastPageOfSection, docType);
-          
-          if (isLastPageOfSection) {
-            drawSignatures(docType, yPos);
-          } else {
-            yPos += 5;
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
-            doc.setTextColor(0, 0, 0);
-          }
-          
-          sectionPageCount++;
-        }
+        sectionPageCount++;
       }
-
-      const pageCount = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        doc.text(
-          `Page ${i} of ${pageCount}`,
-          pageWidth / 2,
-          pageHeight - 8,
-          { align: "center" }
-        );
-        doc.setTextColor(0, 0, 0);
-      }
-
-      const fileName = `PackingList_${packingData.packingNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
-      doc.save(fileName);
-      
-      setProcessingStage(null);
-      return true;
-
-    } catch (error) {
-      console.error("PDF Generation Error:", error);
-      setProcessingStage('error');
-      return false;
-    } finally {
-      setTimeout(() => {
-        setGeneratingPDF(false);
-        setProcessingStage(null);
-      }, 500);
     }
-  };
+
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        `Page ${i} of ${pageCount}`,
+        pageWidth / 2,
+        pageHeight - 8,
+        { align: "center" }
+      );
+      doc.setTextColor(0, 0, 0);
+    }
+
+    const fileName = `PackingList_${packingData.packingNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
+    
+    setProcessingStage(null);
+    return true;
+
+  } catch (error) {
+    console.error("PDF Generation Error:", error);
+    setProcessingStage('error');
+    return false;
+  } finally {
+    setTimeout(() => {
+      setGeneratingPDF(false);
+      setProcessingStage(null);
+    }, 500);
+  }
+};
 
   useEffect(() => {
     if (debugContainerRef.current) {
@@ -1957,134 +2376,153 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     );
   };
 
-  // Edit Item Modal Component
-  const EditItemModal = () => {
-    if (!editItemData) return null;
-    
-    return (
-      <div className="blue-modal-overlay" onClick={() => setIsEditModalOpen(false)}>
-        <div className="blue-modal blue-modal-medium" onClick={(e) => e.stopPropagation()}>
-          <div className="blue-modal-header">
-            <div className="blue-modal-header-left">
-              <span className="blue-modal-icon">✏️</span>
-              <h3>Edit Item</h3>
-              <span className="blue-modal-badge">Modify Details</span>
-            </div>
-            <button className="blue-modal-close" onClick={() => setIsEditModalOpen(false)}>✕</button>
+// Edit Item Modal Component - Simple Version
+// Edit Item Modal Component - Corrected Simple Version
+const EditItemModal = () => {
+  // All hooks MUST be called before any conditional return
+  const [formData, setFormData] = useState({ 
+    sets: 0, 
+    setsPerPcs: 0, 
+    looseOperation: "add", 
+    loosePcs: 0 
+  });
+  
+  // Update form data when editItemData changes
+  useEffect(() => {
+    if (editItemData) {
+      setFormData({
+        sets: editItemData.sets || 0,
+        setsPerPcs: editItemData.setsPerPcs || 0,
+        looseOperation: editItemData.looseOperation || "add",
+        loosePcs: editItemData.loosePcs || 0
+      });
+    }
+  }, [editItemData]);
+  
+  // Calculate quantity
+  const calculateQuantity = (sets, setsPerPcs, loosePcs, looseOperation) => {
+    const baseQty = (parseInt(sets) || 0) * (parseInt(setsPerPcs) || 0);
+    const loose = parseInt(loosePcs) || 0;
+    return looseOperation === "subtract" ? Math.max(0, baseQty - loose) : baseQty + loose;
+  };
+  
+  const totalQuantity = calculateQuantity(
+    formData.sets, 
+    formData.setsPerPcs, 
+    formData.loosePcs, 
+    formData.looseOperation
+  );
+  
+  // Update a single field
+  const updateField = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+  
+  // Save changes
+  const saveChanges = () => {
+    if (!editItemData) return;
+    const updatedItem = {
+      ...editItemData,
+      ...formData,
+      quantity: totalQuantity
+    };
+    setEditItemData(updatedItem);
+    saveEditedItem();
+  };
+  
+  // Conditional return AFTER all hooks
+  if (!editItemData) return null;
+  
+  return (
+    <div className="blue-modal-overlay" onClick={() => setIsEditModalOpen(false)}>
+      <div className="blue-modal blue-modal-medium" onClick={(e) => e.stopPropagation()}>
+        <div className="blue-modal-header">
+          <div className="blue-modal-header-left">
+            <span className="blue-modal-icon">✏️</span>
+            <h3>Edit Item</h3>
           </div>
-          <div className="blue-modal-body">
-            <div className="blue-edit-form">
-              <div className="blue-form-row">
-                <div className="blue-form-field">
-                  <label>Lot Number</label>
-                  <input type="text" value={editItemData.lotNumber || ""} readOnly className="blue-input blue-input-readonly" />
-                </div>
-                <div className="blue-form-field">
-                  <label>Brand</label>
-                  <input type="text" value={editItemData.brand || ""} readOnly className="blue-input blue-input-readonly" />
-                </div>
-              </div>
-              <div className="blue-form-field">
-                <label>Description</label>
-                <input type="text" value={editItemData.description || ""} readOnly className="blue-input blue-input-readonly" />
-              </div>
-              <div className="blue-form-row">
-                <div className="blue-form-field">
-                  <label>Sets</label>
-                  <input 
-                    type="number" 
-                    value={editItemData.sets || 0} 
-                    onChange={(e) => {
-                      const newSets = parseInt(e.target.value) || 0;
-                      const newQuantity = calculateTotalQuantity(
-                        newSets, 
-                        editItemData.setsPerPcs, 
-                        editItemData.loosePcs,
-                        editItemData.looseOperation || "add"
-                      );
-                      setEditItemData({ ...editItemData, sets: newSets, quantity: newQuantity });
-                    }} 
-                    className="blue-input" 
-                  />
-                </div>
-                <div className="blue-form-field">
-                  <label>Pieces per Set (Pc/Set)</label>
-                  <input 
-                    type="number" 
-                    value={editItemData.setsPerPcs || 0} 
-                    onChange={(e) => {
-                      const newPcsPerSet = parseInt(e.target.value) || 0;
-                      const newQuantity = calculateTotalQuantity(
-                        editItemData.sets, 
-                        newPcsPerSet, 
-                        editItemData.loosePcs,
-                        editItemData.looseOperation || "add"
-                      );
-                      setEditItemData({ ...editItemData, setsPerPcs: newPcsPerSet, quantity: newQuantity });
-                    }} 
-                    className="blue-input" 
-                  />
-                </div>
-              </div>
-              <div className="blue-form-row">
-                <div className="blue-form-field">
-                  <label>Operation</label>
-                  <select 
-                    value={editItemData.looseOperation || "add"} 
-                    onChange={(e) => {
-                      const newOperation = e.target.value;
-                      const newQuantity = calculateTotalQuantity(
-                        editItemData.sets, 
-                        editItemData.setsPerPcs, 
-                        editItemData.loosePcs, 
-                        newOperation
-                      );
-                      setEditItemData({ ...editItemData, looseOperation: newOperation, quantity: newQuantity });
-                    }} 
-                    className="blue-select"
-                  >
-                    <option value="add">➕ Addition (Add to total)</option>
-                    <option value="subtract">➖ Subtraction (Subtract from total)</option>
-                  </select>
-                </div>
-                <div className="blue-form-field">
-                  <label>Loose Pieces</label>
-                  <input 
-                    type="number" 
-                    value={editItemData.loosePcs || 0} 
-                    onChange={(e) => {
-                      const newLoose = parseInt(e.target.value) || 0;
-                      const newQuantity = calculateTotalQuantity(
-                        editItemData.sets, 
-                        editItemData.setsPerPcs, 
-                        newLoose, 
-                        editItemData.looseOperation || "add"
-                      );
-                      setEditItemData({ ...editItemData, loosePcs: newLoose, quantity: newQuantity });
-                    }} 
-                    className="blue-input" 
-                  />
-                </div>
-              </div>
-              <div className="blue-form-field blue-total-field">
-                <label>Total Quantity</label>
-                <input type="number" value={editItemData.quantity || 0} readOnly className="blue-input blue-total-input" />
-              </div>
-            </div>
+          <button className="blue-modal-close" onClick={() => setIsEditModalOpen(false)}>✕</button>
+        </div>
+        
+        <div className="blue-modal-body">
+          {/* Read-only fields */}
+          <div className="blue-form-field">
+            <label>Lot Number</label>
+            <input type="text" value={editItemData.lotNumber || ""} readOnly className="blue-input" />
           </div>
-          <div className="blue-modal-footer">
-            <button onClick={() => setIsEditModalOpen(false)} className="blue-btn blue-btn-secondary">
-              Cancel
-            </button>
-            <button onClick={saveEditedItem} className="blue-btn blue-btn-primary">
-              Save Changes
-            </button>
+          
+          <div className="blue-form-field">
+            <label>Brand</label>
+            <input type="text" value={editItemData.brand || ""} readOnly className="blue-input" />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>Description</label>
+            <input type="text" value={editItemData.description || ""} readOnly className="blue-input" />
+          </div>
+          
+          {/* Editable fields */}
+          <div className="blue-form-field">
+            <label>Sets</label>
+            <input 
+              type="number" 
+              value={formData.sets} 
+              onChange={(e) => updateField("sets", parseInt(e.target.value) || 0)} 
+              className="blue-input" 
+              autoFocus
+            />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>Pieces per Set</label>
+            <input 
+              type="number" 
+              value={formData.setsPerPcs} 
+              onChange={(e) => updateField("setsPerPcs", parseInt(e.target.value) || 0)} 
+              className="blue-input" 
+            />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>Operation</label>
+            <select 
+              value={formData.looseOperation} 
+              onChange={(e) => updateField("looseOperation", e.target.value)} 
+              className="blue-select"
+            >
+              <option value="add">➕ Add to total</option>
+              <option value="subtract">➖ Subtract from total</option>
+            </select>
+          </div>
+          
+          <div className="blue-form-field">
+            <label>Loose Pieces</label>
+            <input 
+              type="number" 
+              value={formData.loosePcs} 
+              onChange={(e) => updateField("loosePcs", parseInt(e.target.value) || 0)} 
+              className="blue-input" 
+            />
+          </div>
+          
+          <div className="blue-form-field">
+            <label>Total Quantity</label>
+            <input type="number" value={totalQuantity} readOnly className="blue-input" style={{ fontWeight: 'bold', backgroundColor: '#e8f0fe' }} />
           </div>
         </div>
+        
+        <div className="blue-modal-footer">
+          <button onClick={() => setIsEditModalOpen(false)} className="blue-btn blue-btn-secondary">
+            Cancel
+          </button>
+          <button onClick={saveChanges} className="blue-btn blue-btn-primary">
+            Save Changes
+          </button>
+        </div>
       </div>
-    );
-  };
-
+    </div>
+  );
+};
   // Confirmation Modal Component
   const ConfirmationModal = () => {
     if (!tempBillData) return null;
@@ -2094,142 +2532,207 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
     const totalSets = tempBillData.items.reduce((sum, item) => sum + (item.sets || 0), 0);
     
     return (
-      <div className="blue-modal-overlay" onClick={() => setIsConfirmModalOpen(false)}>
-        <div className="blue-modal blue-modal-large" onClick={(e) => e.stopPropagation()}>
-          <div className="blue-modal-header">
-            <div className="blue-modal-header-left">
-              <span className="blue-modal-icon">✅</span>
-              <h3>Confirm Packing List</h3>
-              <span className="blue-modal-badge">Review Before Submission</span>
-            </div>
-            <button className="blue-modal-close" onClick={() => setIsConfirmModalOpen(false)}>✕</button>
-          </div>
-          <div className="blue-modal-body">
-            <div className="blue-user-info-bar" style={{ 
-              backgroundColor: '#e8f0fe', 
-              padding: '10px 15px', 
-              borderRadius: '8px', 
-              marginBottom: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              fontSize: '13px',
-              border: '1px solid #cbd5e1'
-            }}>
-              <span style={{ fontSize: '18px' }}>👤</span>
-              <div>
-                <strong>Prepared by:</strong> {preparedBy}
-                <span style={{ marginLeft: '10px', color: '#666' }}>({userRole})</span>
-              </div>
-              <div style={{ marginLeft: 'auto' }}>
-                <strong>Time:</strong> {new Date().toLocaleString()}
-              </div>
-            </div>
+    <div className="blue-modal-overlay" onClick={() => setIsConfirmModalOpen(false)}>
+  <div className="blue-modal blue-modal-large" onClick={(e) => e.stopPropagation()}>
+    <div className="blue-modal-header">
+      <div className="blue-modal-header-left">
+        <span className="blue-modal-icon">✅</span>
+        <h3>Confirm Packing List</h3>
+        <span className="blue-modal-badge">Review Before Submission</span>
+      </div>
+      <button className="blue-modal-close" onClick={() => setIsConfirmModalOpen(false)}>✕</button>
+    </div>
+    <div className="blue-modal-body">
+      <div className="blue-user-info-bar" style={{ 
+        backgroundColor: '#e8f0fe', 
+        padding: '10px 15px', 
+        borderRadius: '8px', 
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        fontSize: '13px',
+        border: '1px solid #cbd5e1'
+      }}>
+        <span style={{ fontSize: '18px' }}>👤</span>
+        <div>
+          <strong>Prepared by:</strong> {preparedBy}
+          <span style={{ marginLeft: '10px', color: '#666' }}>({userRole})</span>
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
+          <strong>Time:</strong> {new Date().toLocaleString()}
+        </div>
+      </div>
 
-            <div className="blue-confirm-summary">
-              <div className="blue-summary-card">
-                <div className="blue-summary-label">Party Name</div>
-                <div className="blue-summary-value">{selectedPartyState?.name || tempBillData.partyName}</div>
-              </div>
-              <div className="blue-summary-card">
-                <div className="blue-summary-label">Bill Date</div>
-                <div className="blue-summary-value">{tempBillData.billDate}</div>
-              </div>
-              <div className="blue-summary-card">
-                <div className="blue-summary-label">Total Items</div>
-                <div className="blue-summary-value">{totalItems}</div>
-              </div>
-              <div className="blue-summary-card">
-                <div className="blue-summary-label">Total Quantity</div>
-                <div className="blue-summary-value">{totalQuantity}</div>
-              </div>
-              <div className="blue-summary-card">
-                <div className="blue-summary-label">Total Sets</div>
-                <div className="blue-summary-value">{totalSets}</div>
-              </div>
-            </div>
-
-            <div className="blue-confirm-table-wrapper">
-              <table className="blue-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Lot No</th>
-                    <th>Brand</th>
-                    <th>Description</th>
-                    <th>Sets</th>
-                    <th>Pc/Set</th>
-                    <th>Op</th>
-                    <th>Loose</th>
-                    <th>Total</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tempBillData.items.map((item, idx) => (
-                    <tr key={item.id}>
-                      <td className="blue-sno">{idx + 1}</td>
-                      <td className="blue-lot-cell">
-                        {item.lotNumber || '-'}
-                        {item.lotNumber && (
-                          <button 
-                            onClick={() => {
-                              setIsConfirmModalOpen(false);
-                              openLotDetails(item.lotNumber);
-                            }} 
-                            className="blue-lot-details-btn"
-                            title="View lot dispatch history"
-                          >
-                            📊
-                          </button>
-                        )}
-                      </td>
-                      <td className="blue-brand-cell">{item.brand || '-'}</td>
-                      <td className="blue-item-name">{item.description}</td>
-                      <td className="blue-qty-cell">{item.sets || 0}</td>
-                      <td className="blue-qty-cell">{item.setsPerPcs || 0}</td>
-                      <td className="blue-qty-cell">{item.looseOperation === 'subtract' ? '➖' : '➕'}</td>
-                      <td className="blue-qty-cell">{item.loosePcs || 0}</td>
-                      <td className="blue-qty-cell blue-total-qty">{item.quantity || 0}</td>
-                      <td className="blue-actions-cell">
-                        <button 
-                          onClick={() => {
-                            setIsConfirmModalOpen(false);
-                            openEditModal(idx);
-                          }} 
-                          className="blue-edit-btn"
-                          title="Edit Item"
-                        >
-                          ✏️
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="blue-confirm-notes">
-              <label>Notes (Optional)</label>
-              <textarea 
-                value={tempBillData.notes || ""} 
-                onChange={(e) => setTempBillData({ ...tempBillData, notes: e.target.value })}
-                placeholder="Add any additional notes..."
-                className="blue-textarea"
-                rows="2"
-              />
-            </div>
-          </div>
-          <div className="blue-modal-footer">
-            <button onClick={() => setIsConfirmModalOpen(false)} className="blue-btn blue-btn-secondary">
-              Cancel
-            </button>
-            <button onClick={handleFinalSubmit} className="blue-btn blue-btn-primary blue-btn-large">
-              Confirm & Generate
-            </button>
+      <div className="blue-confirm-summary">
+        <div className="blue-summary-card">
+          <div className="blue-summary-label">Party Name</div>
+          <div className="blue-summary-value">{selectedPartyState?.name || tempBillData.partyName}</div>
+        </div>
+        <div className="blue-summary-card">
+          <div className="blue-summary-label">Bill Date</div>
+          <div className="blue-summary-value">{tempBillData.billDate}</div>
+        </div>
+        <div className="blue-summary-card">
+          <div className="blue-summary-label">Total Items</div>
+          <div className="blue-summary-value">{totalItems}</div>
+        </div>
+        <div className="blue-summary-card">
+          <div className="blue-summary-label">Total Quantity</div>
+          <div className="blue-summary-value">{totalQuantity}</div>
+        </div>
+        <div className="blue-summary-card">
+          <div className="blue-summary-label">Total Sets</div>
+          <div className="blue-summary-value">
+            {/* Calculate total sets by summing the actual set values */}
+            {tempBillData.items.reduce((total, item) => {
+              if (!item.sets) return total;
+              
+              // Function to calculate sum from concatenated or '+' separated sets
+              const calculateSetSum = (setsValue) => {
+                const setsStr = String(setsValue);
+                if (setsStr.includes('+')) {
+                  return setsStr.split('+').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
+                } else if (setsStr.length > 2) {
+                  // For concatenated format like "200206" (assuming 2-digit parts)
+                  const partSize = 2;
+                  const parts = [];
+                  for (let i = 0; i < setsStr.length; i += partSize) {
+                    parts.push(parseInt(setsStr.substr(i, partSize)) || 0);
+                  }
+                  return parts.reduce((sum, num) => sum + num, 0);
+                } else {
+                  // Single number like "20"
+                  return parseInt(setsStr) || 0;
+                }
+              };
+              
+              return total + calculateSetSum(item.sets);
+            }, 0)}
           </div>
         </div>
       </div>
+
+      <div className="blue-confirm-table-wrapper">
+        <table className="blue-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Lot No</th>
+              <th>Brand</th>
+              <th>Description</th>
+              <th>Sets</th>
+              <th>Pc/Set</th>
+              <th>Op</th>
+              <th>Loose</th>
+              <th>Total</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tempBillData.items.map((item, idx) => {
+              // Function to calculate the sum of set parts
+              const calculateSetSum = (setsValue) => {
+                if (!setsValue) return 0;
+                const setsStr = String(setsValue);
+                if (setsStr.includes('+')) {
+                  return setsStr.split('+').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
+                } else if (setsStr.length > 2) {
+                  // For concatenated format like "200206" (assuming 2-digit parts)
+                  const partSize = 2;
+                  const parts = [];
+                  for (let i = 0; i < setsStr.length; i += partSize) {
+                    parts.push(parseInt(setsStr.substr(i, partSize)) || 0);
+                  }
+                  return parts.reduce((sum, num) => sum + num, 0);
+                } else {
+                  // Single number like "20"
+                  return parseInt(setsStr) || 0;
+                }
+              };
+              
+              const setSum = calculateSetSum(item.sets);
+              const isMultipleParts = item.sets && 
+                (String(item.sets).includes('+') || String(item.sets).length > 2);
+              
+              return (
+                <tr key={item.id}>
+                  <td className="blue-sno">{idx + 1}</td>
+                  <td className="blue-lot-cell">
+                    {item.lotNumber || '-'}
+                    {item.lotNumber && (
+                      <button 
+                        onClick={() => {
+                          setIsConfirmModalOpen(false);
+                          openLotDetails(item.lotNumber);
+                        }} 
+                        className="blue-lot-details-btn"
+                        title="View lot dispatch history"
+                      >
+                        📊
+                      </button>
+                    )}
+                  </td>
+                  <td className="blue-brand-cell">{item.brand || '-'}</td>
+                  <td className="blue-item-name">{item.description}</td>
+                  <td className="blue-qty-cell">
+                    {item.sets ? (
+                      isMultipleParts ? (
+                        <span style={{ fontWeight: '500' }}>
+                          {item.sets} = {setSum}
+                        </span>
+                      ) : (
+                        <span>{setSum}</span>
+                      )
+                    ) : '0'}
+                  </td>
+                  <td className="blue-qty-cell">{item.setsPerPcs || 0}</td>
+                  <td className="blue-qty-cell">{item.looseOperation === 'subtract' ? '➖' : '➕'}</td>
+                  <td className="blue-qty-cell">{item.loosePcs || 0}</td>
+                  <td className="blue-qty-cell blue-total-qty">{item.quantity || 0}</td>
+                  <td className="blue-actions-cell">
+                    <button 
+                      onClick={() => {
+                        setIsConfirmModalOpen(false);
+                        openEditModal(idx);
+                      }} 
+                      className="blue-edit-btn"
+                      title="Edit Item"
+                    >
+                      ✏️
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="blue-confirm-notes">
+        <label>Notes (Optional)</label>
+        <textarea 
+          value={tempBillData.notes || ""} 
+          onChange={(e) => setTempBillData({ ...tempBillData, notes: e.target.value })}
+          placeholder="Add any additional notes..."
+          className="blue-textarea"
+          rows="2"
+        />
+      </div>
+    </div>
+    <div className="blue-modal-footer">
+      <button onClick={() => setIsConfirmModalOpen(false)} className="blue-btn blue-btn-secondary">
+        Cancel
+      </button>
+      <button onClick={() => handleFinalAction('draft')} className="blue-btn blue-btn-secondary blue-btn-large">
+        💾 Save as Draft
+      </button>
+      <button onClick={() => handleFinalAction('final')} className="blue-btn blue-btn-primary blue-btn-large">
+        ✅ Final Submission
+      </button>
+    </div>
+  </div>
+</div>
     );
   };
 
@@ -2824,6 +3327,7 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
       {isEditModalOpen && <EditItemModal />}
       {isConfirmModalOpen && <ConfirmationModal />}
       {isLotDetailsModalOpen && <LotDetailsModal />}
+      {isPackingMaterialsModalOpen && <PackingMaterialsModal />}
 
       <div className="blue-user-bar" style={{
         backgroundColor: '#f0f4ff',
@@ -3070,24 +3574,24 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
         <div className="blue-modal-sidebar">
           <div className="blue-sidebar-header">
             <span className="blue-sidebar-icon">🔍</span>
-            <h4>Lot Search</h4>
+            <h4>OLD Lot Search</h4>
           </div>
           
           <div className="blue-sidebar-search">
-            <input 
-              type="text" 
-              value={lotSearchTerm}
-              onChange={(e) => {
-                const value = e.target.value.replace(/[^0-9]/g, '');
-                setLotSearchTerm(value);
-                setManualLotInput(value);
-                searchLotsWithSuggestions(value);
-              }}
-              onKeyDown={handleLotInputKeyDown}
-              placeholder="Enter Lot Number..." 
-              className="blue-sidebar-input" 
-              autoComplete="off"
-            />
+          <input 
+  type="text" 
+  value={lotSearchTerm}
+  onChange={(e) => {
+    const value = e.target.value;  // ← Allow any characters
+    setLotSearchTerm(value);
+    setManualLotInput(value);
+    searchLotsWithSuggestions(value);
+  }}
+  onKeyDown={handleLotInputKeyDown}
+  placeholder="Enter Lot Number..." 
+  className="blue-sidebar-input" 
+  autoComplete="off"
+/>
             <button 
               type="button" 
               onClick={() => setShowNumericKeyboard(true)} 
@@ -3099,50 +3603,52 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
           </div>
           
           <div className="blue-sidebar-suggestions">
-            {loadingLotSummary ? (
-              <div className="blue-sidebar-loading">
-                <div className="blue-spinner-small"></div>
-                <p>Loading suggestions...</p>
-              </div>
-            ) : lotSuggestions.length > 0 ? (
-              lotSuggestions.map((suggestion, idx) => (
-                <div
-                  key={`${suggestion.lotNumber}-${idx}`}
-                  className={`blue-sidebar-suggestion-item ${selectedSuggestionIndex === idx ? 'selected' : ''}`}
-                  onClick={() => selectLotFromSuggestion(suggestion)}
-                  onMouseEnter={() => setSelectedSuggestionIndex(idx)}
-                >
-                  <div className="blue-suggestion-main">
-                    <span className="blue-suggestion-lot">📦 LOT: {suggestion.lotNumber}</span>
-                    {suggestion.isOldLot && (
-                      <span className="blue-old-lot-tag">OLD STOCK</span>
-                    )}
-                  </div>
-                  <div className="blue-suggestion-details">
-                    <span className="blue-suggestion-item">{suggestion.description}</span>
-                    {suggestion.brand && (
-                      <span className="blue-suggestion-brand">🏷️ {suggestion.brand}</span>
-                    )}
-                    {suggestion.piecesPerSet > 0 && (
-                      <span className="blue-suggestion-pcs">📊 {suggestion.piecesPerSet} Pc/Set</span>
-                    )}
-                  </div>
-                </div>
-              ))
-            ) : lotSearchTerm ? (
-              <div className="blue-sidebar-empty">
-                <span className="blue-empty-icon">🔍</span>
-                <p>No matching lots found</p>
-                <span className="blue-empty-hint">Try a different lot number</span>
-              </div>
-            ) : (
-              <div className="blue-sidebar-empty">
-                <span className="blue-empty-icon">📦</span>
-                <p>Enter a lot number to search</p>
-                <span className="blue-empty-hint">Type lot number to see suggestions</span>
-              </div>
-            )}
-          </div>
+  {loadingLotSummary ? (
+    <div className="blue-sidebar-loading">
+      <div className="blue-spinner-small"></div>
+      <p>Loading suggestions...</p>
+    </div>
+  ) : lotSuggestions.length > 0 ? (
+    lotSuggestions.map((suggestion, idx) => (
+      <div
+        key={suggestion.id || `${suggestion.lotNumber}-${idx}`}
+        className={`blue-sidebar-suggestion-item ${selectedSuggestionIndex === idx ? 'selected' : ''}`}
+        onClick={() => selectLotFromSuggestion(suggestion)}
+        onMouseEnter={() => setSelectedSuggestionIndex(idx)}
+      >
+        <div className="blue-suggestion-main">
+          <span className="blue-suggestion-lot">📦 LOT: {suggestion.lotNumber}</span>
+          {suggestion.isOldLot && (
+            <span className="blue-old-lot-tag">OLD STOCK</span>
+          )}
+        </div>
+        <div className="blue-suggestion-details">
+          <span className="blue-suggestion-item">
+            {suggestion.displayDescription || suggestion.description}
+          </span>
+          {suggestion.brand && (
+            <span className="blue-suggestion-brand">🏷️ {suggestion.brand}</span>
+          )}
+          {suggestion.piecesPerSet > 0 && (
+            <span className="blue-suggestion-pcs">📊 {suggestion.piecesPerSet} Pc/Set</span>
+          )}
+        </div>
+      </div>
+    ))
+  ) : lotSearchTerm ? (
+    <div className="blue-sidebar-empty">
+      <span className="blue-empty-icon">🔍</span>
+      <p>No matching lots found</p>
+      <span className="blue-empty-hint">Try a different lot number</span>
+    </div>
+  ) : (
+    <div className="blue-sidebar-empty">
+      <span className="blue-empty-icon">📦</span>
+      <p>Enter a lot number to search</p>
+      <span className="blue-empty-hint">Type lot number to see suggestions</span>
+    </div>
+  )}
+</div>
         </div>
 
         {/* RIGHT CONTENT - Product Details */}
@@ -3292,107 +3798,166 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
               </div>
             </div>
           </div>
-
-          <div className="blue-modal-section blue-lot-summary-panel">
-            <div className="blue-section-header">
-              <div className="blue-section-header-left">
-                <span className="blue-section-icon">📊</span>
-                <h4>Lot Dispatch Summary</h4>
-              </div>
-              <button 
-                onClick={() => currentProduct.lotNumber && openLotDetails(currentProduct.lotNumber)}
-                className="blue-btn blue-btn-outline blue-btn-small"
-                disabled={!currentProduct.lotNumber}
-              >
-                📋 See Lot Details
-              </button>
-              {loadingLotSummary && <div className="blue-loading-spinner-small"></div>}
+<div className="blue-modal-section blue-lot-summary-panel">
+  <div className="blue-section-header">
+    <div className="blue-section-header-left">
+      <span className="blue-section-icon">📊</span>
+      <h4>Lot Dispatch Summary</h4>
+    </div>
+    <button 
+      onClick={() => currentProduct.lotNumber && openLotDetails(currentProduct.lotNumber)}
+      className="blue-btn blue-btn-outline blue-btn-small"
+      disabled={!currentProduct.lotNumber}
+    >
+      📋 See Lot Details
+    </button>
+    {loadingLotSummary && <div className="blue-loading-spinner-small"></div>}
+  </div>
+  <div className="blue-section-content">
+    {currentProduct.lotNumber ? (
+      (() => {
+        // Try to find lot in summary
+        let lotInfo = lotSummary.find(l => l.lotNumber === currentProduct.lotNumber);
+        
+        // If not found and we're not already loading, fetch updated summary
+        if (!lotInfo && !loadingLotSummary && currentProduct.lotNumber) {
+          // Trigger a refresh of lot summary
+          setTimeout(() => fetchLotSummary(), 100);
+          return (
+            <div className="blue-lot-empty">
+              <span className="blue-empty-icon">🔄</span>
+              <p>Loading lot information...</p>
+              <span className="blue-empty-hint">Fetching dispatch data for this lot</span>
             </div>
-            <div className="blue-section-content">
-              {currentProduct.lotNumber ? (
-                (() => {
-                  const lotInfo = lotSummary.find(l => l.lotNumber === currentProduct.lotNumber);
-                  
-                  if (lotInfo && lotInfo.isOldLot) {
-                    return (
-                      <div className="blue-lot-summary-detail">
-                        <div className="blue-lot-badge">
-                          <span className="blue-lot-badge-label">LOT</span>
-                          <span className="blue-lot-badge-number">{currentProduct.lotNumber}</span>
-                          <span className="blue-old-lot-badge">OLD STOCK</span>
-                        </div>
-                        <div className="blue-lot-metrics-grid">
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Total Pieces</div>
-                            <div className="blue-metric-value">∞</div>
-                            <div className="blue-metric-hint">Unlimited</div>
-                          </div>
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Dispatched So Far</div>
-                            <div className="blue-metric-value blue-dispatched-value">{lotInfo.dispatchedQty.toLocaleString()}</div>
-                          </div>
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Available</div>
-                            <div className="blue-metric-value blue-unlimited">Unlimited</div>
-                          </div>
-                        </div>
-                        <div className="blue-alert blue-alert-info" style={{ marginTop: '12px' }}>
-                          ℹ️ This is an old stock lot. No quantity restrictions apply.
-                        </div>
-                      </div>
-                    );
-                  } else if (lotInfo && lotInfo.totalPieces > 0) {
-                    return (
-                      <div className="blue-lot-summary-detail">
-                        <div className="blue-lot-badge">
-                          <span className="blue-lot-badge-label">LOT</span>
-                          <span className="blue-lot-badge-number">{currentProduct.lotNumber}</span>
-                        </div>
-                        <div className="blue-lot-metrics-grid">
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Total Pieces</div>
-                            <div className="blue-metric-value">{lotInfo.totalPieces.toLocaleString()}</div>
-                          </div>
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Dispatched</div>
-                            <div className="blue-metric-value blue-dispatched-value">{lotInfo.dispatchedQty.toLocaleString()}</div>
-                          </div>
-                          <div className="blue-metric-card">
-                            <div className="blue-metric-label">Available</div>
-                            <div className={`blue-metric-value ${lotInfo.availablePieces <= 0 ? 'blue-out-of-stock' : 'blue-in-stock'}`}>
-                              {lotInfo.availablePieces.toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                        <div className={`blue-lot-status ${lotInfo.status === 'COMPLETED' ? 'blue-status-completed' : lotInfo.status === 'PARTIAL' ? 'blue-status-partial' : 'blue-status-pending'}`}>
-                          <span className="blue-status-dot"></span>
-                          {lotInfo.status}
-                        </div>
-                        {lotInfo.availablePieces <= 0 && (
-                          <div className="blue-alert blue-alert-error">
-                            ⚠️ This lot is fully dispatched! No pieces available.
-                          </div>
-                        )}
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div className="blue-lot-empty">
-                        <span className="blue-empty-icon">🔍</span>
-                        <p>Loading lot information...</p>
-                      </div>
-                    );
-                  }
-                })()
-              ) : (
-                <div className="blue-lot-empty">
-                  <span className="blue-empty-icon">🔍</span>
-                  <p>No lot selected</p>
-                  <span className="blue-empty-hint">Select a lot from the left panel</span>
+          );
+        }
+        
+        // If still loading
+        if (loadingLotSummary) {
+          return (
+            <div className="blue-lot-empty">
+              <div className="blue-spinner-small"></div>
+              <p>Loading lot information...</p>
+            </div>
+          );
+        }
+        
+        // If lotInfo exists, display it
+        if (lotInfo && lotInfo.isOldLot) {
+          return (
+            <div className="blue-lot-summary-detail">
+              <div className="blue-lot-badge">
+                <span className="blue-lot-badge-label">LOT</span>
+                <span className="blue-lot-badge-number">{currentProduct.lotNumber}</span>
+                <span className="blue-old-lot-badge">OLD STOCK</span>
+              </div>
+              <div className="blue-lot-metrics-grid">
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Total Pieces</div>
+                  <div className="blue-metric-value">∞</div>
+                  <div className="blue-metric-hint">Unlimited</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Dispatched So Far</div>
+                  <div className="blue-metric-value blue-dispatched-value">{lotInfo.dispatchedQty.toLocaleString()}</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Available</div>
+                  <div className="blue-metric-value blue-unlimited">Unlimited</div>
+                </div>
+              </div>
+              <div className="blue-alert blue-alert-info" style={{ marginTop: '12px' }}>
+                ℹ️ This is an old stock lot. No quantity restrictions apply.
+              </div>
+            </div>
+          );
+        } else if (lotInfo && lotInfo.totalPieces > 0) {
+          return (
+            <div className="blue-lot-summary-detail">
+              <div className="blue-lot-badge">
+                <span className="blue-lot-badge-label">LOT</span>
+                <span className="blue-lot-badge-number">{currentProduct.lotNumber}</span>
+              </div>
+              <div className="blue-lot-metrics-grid">
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Total Pieces</div>
+                  <div className="blue-metric-value">{lotInfo.totalPieces.toLocaleString()}</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Dispatched</div>
+                  <div className="blue-metric-value blue-dispatched-value">{lotInfo.dispatchedQty.toLocaleString()}</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Available</div>
+                  <div className={`blue-metric-value ${lotInfo.availablePieces <= 0 ? 'blue-out-of-stock' : 'blue-in-stock'}`}>
+                    {lotInfo.availablePieces.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+              <div className={`blue-lot-status ${lotInfo.status === 'COMPLETED' ? 'blue-status-completed' : lotInfo.status === 'PARTIAL' ? 'blue-status-partial' : 'blue-status-pending'}`}>
+                <span className="blue-status-dot"></span>
+                {lotInfo.status}
+              </div>
+              {lotInfo.availablePieces <= 0 && (
+                <div className="blue-alert blue-alert-error">
+                  ⚠️ This lot is fully dispatched! No pieces available.
                 </div>
               )}
             </div>
-          </div>
+          );
+        } else if (lotInfo) {
+          // Lot exists but has no pieces (new lot not yet in summary)
+          return (
+            <div className="blue-lot-summary-detail">
+              <div className="blue-lot-badge">
+                <span className="blue-lot-badge-label">LOT</span>
+                <span className="blue-lot-badge-number">{currentProduct.lotNumber}</span>
+                <span className="blue-new-lot-badge">NEW LOT</span>
+              </div>
+              <div className="blue-lot-metrics-grid">
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Total Pieces</div>
+                  <div className="blue-metric-value">{lotInfo.totalPieces?.toLocaleString() || '0'}</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Dispatched</div>
+                  <div className="blue-metric-value blue-dispatched-value">{lotInfo.dispatchedQty?.toLocaleString() || '0'}</div>
+                </div>
+                <div className="blue-metric-card">
+                  <div className="blue-metric-label">Available</div>
+                  <div className="blue-metric-value blue-in-stock">
+                    {lotInfo.availablePieces?.toLocaleString() || '0'}
+                  </div>
+                </div>
+              </div>
+              <div className="blue-lot-status blue-status-pending">
+                <span className="blue-status-dot"></span>
+                PENDING
+              </div>
+              <div className="blue-alert blue-alert-info" style={{ marginTop: '12px' }}>
+                ℹ️ This is a new lot. No previous dispatches recorded.
+              </div>
+            </div>
+          );
+        } else {
+          return (
+            <div className="blue-lot-empty">
+              <span className="blue-empty-icon">🔍</span>
+              <p>Lot not found in database</p>
+              <span className="blue-empty-hint">Please check the lot number</span>
+            </div>
+          );
+        }
+      })()
+    ) : (
+      <div className="blue-lot-empty">
+        <span className="blue-empty-icon">🔍</span>
+        <p>No lot selected</p>
+        <span className="blue-empty-hint">Select a lot from the left panel</span>
+      </div>
+    )}
+  </div>
+</div>
         </div>
       </div>
 
