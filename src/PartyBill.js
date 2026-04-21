@@ -6,7 +6,7 @@ import "./PartyBill.css";
 import jsPDF from 'jspdf';
 
 // Google Apps Script URL - REPLACE WITH YOUR DEPLOYED WEB APP URL
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby6xq5wwpc_gfKxQa1edafvw5ocKFHgMgMsC83vHnXxZt3kqZpC6u9i7AwsIan831TH/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzH-wYV-ZBegx5QyJ-6yDRvEzxgzgjjE7CN_KY6G9RuV7QW_GA4nSbhCDc1lI-r7o6U/exec";
 
 // Bills Sheet ID - Replace with your Bills sheet ID
 const BILLS_SHEET_ID = "1s8cXaMtG2XSxdOu1Ecve5aLI2MQcbMjVsn6Sih4hItk";
@@ -80,6 +80,9 @@ const [packingMaterials, setPackingMaterials] = useState({
 });
 const [isPackingMaterialsModalOpen, setIsPackingMaterialsModalOpen] = useState(false);
 const [tempBillDataForDraft, setTempBillDataForDraft] = useState(null);
+const [isEditingExistingDraft, setIsEditingExistingDraft] = useState(false);
+const [existingDraftNumber, setExistingDraftNumber] = useState(null);
+
   
   // On-screen keyboard state
   const [showNumericKeyboard, setShowNumericKeyboard] = useState(false);
@@ -259,68 +262,133 @@ const searchLotsWithSuggestions = (searchTerm) => {
       setShowLotSuggestions(false);
     }
   };
-
-  // ==================== PACKING NUMBER FUNCTIONS ====================
-  
-  const getNextPackingNumber = async () => {
-    try {
-      addDebugMessage("Fetching last packing number from Google Sheets...");
-      
-      const billsData = await fetchBillsFromSheet();
-      let lastNumber = 0;
-      
-      if (billsData && billsData.length > 0) {
-        const numbers = [];
+  const getNextDraftNumber = async () => {
+  try {
+    addDebugMessage(`Fetching next draft number from Google Sheets...`);
+    
+    // First, try to get from the API
+    const response = await fetch(`${APPS_SCRIPT_URL}`, {
+      method: 'GET',
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      if (result.nextDraftNumber) {
+        addDebugMessage(`Next draft number from API: ${result.nextDraftNumber}`, 'success');
+        return result.nextDraftNumber;
+      }
+    }
+    
+    // Fallback: Calculate from local data
+    const billsData = await fetchBillsFromSheet();
+    let maxDraftNumber = 0;
+    
+    if (billsData && billsData.length > 0) {
+      for (const bill of billsData) {
+        let billNumber = '';
         
-        for (const bill of billsData) {
-          let billNumber = '';
-          
-          if (bill['Bill Number']) {
-            billNumber = bill['Bill Number'];
-          }
-          else if (bill['Bill Data (JSON)']) {
-            try {
-              const billData = typeof bill['Bill Data (JSON)'] === 'string' 
-                ? JSON.parse(bill['Bill Data (JSON)']) 
-                : bill['Bill Data (JSON)'];
-              billNumber = billData.billNumber || billData.packingNumber || '';
-            } catch (e) {}
-          }
-          
-          if (billNumber && typeof billNumber === 'string' && billNumber.startsWith('PL-')) {
-            const numberPart = billNumber.replace('PL-', '');
-            
-            if (/^\d{3}$/.test(numberPart)) {
-              const num = parseInt(numberPart, 10);
-              if (!isNaN(num)) {
-                numbers.push(num);
-                addDebugMessage(`Found sequential bill: ${billNumber} (number: ${num})`, 'info');
-              }
+        if (bill['Bill Number']) {
+          billNumber = bill['Bill Number'];
+        }
+        else if (bill['Bill Data (JSON)']) {
+          try {
+            const billData = typeof bill['Bill Data (JSON)'] === 'string' 
+              ? JSON.parse(bill['Bill Data (JSON)']) 
+              : bill['Bill Data (JSON)'];
+            billNumber = billData.billNumber || billData.packingNumber || '';
+          } catch (e) {}
+        }
+        
+        // Check for draft numbers (DL-XXX)
+        if (billNumber && typeof billNumber === 'string' && billNumber.startsWith('DL-')) {
+          const numberPart = billNumber.replace('DL-', '');
+          if (/^\d{3}$/.test(numberPart)) {
+            const num = parseInt(numberPart, 10);
+            if (!isNaN(num) && num > maxDraftNumber) {
+              maxDraftNumber = num;
             }
           }
         }
+      }
+    }
+    
+    const nextNumber = maxDraftNumber + 1;
+    const formattedNumber = String(nextNumber).padStart(3, '0');
+    const draftNumber = `DL-${formattedNumber}`;
+    
+    addDebugMessage(`Next draft number calculated: ${draftNumber}`, 'success');
+    return draftNumber;
+    
+  } catch (error) {
+    console.error("Error getting next draft number:", error);
+    addDebugMessage(`Error: ${error.message}`, 'error');
+    const fallbackNumber = 'DL-001';
+    showToast(`Could not fetch draft number, using ${fallbackNumber}`, "warning");
+    return fallbackNumber;
+  }
+};
+
+  // ==================== PACKING NUMBER FUNCTIONS ====================
+  
+const getNextPackingNumber = async (prefix = 'PL') => {
+  try {
+    addDebugMessage(`Fetching last ${prefix} number from Google Sheets...`);
+    
+    const billsData = await fetchBillsFromSheet();
+    let lastNumber = 0;
+    
+    if (billsData && billsData.length > 0) {
+      const numbers = [];
+      
+      for (const bill of billsData) {
+        let billNumber = '';
         
-        if (numbers.length > 0) {
-          lastNumber = Math.max(...numbers);
-          addDebugMessage(`Found ${numbers.length} sequential bills. Last number: ${lastNumber}`, 'success');
+        if (bill['Bill Number']) {
+          billNumber = bill['Bill Number'];
+        }
+        else if (bill['Bill Data (JSON)']) {
+          try {
+            const billData = typeof bill['Bill Data (JSON)'] === 'string' 
+              ? JSON.parse(bill['Bill Data (JSON)']) 
+              : bill['Bill Data (JSON)'];
+            billNumber = billData.billNumber || billData.packingNumber || '';
+          } catch (e) {}
+        }
+        
+        if (billNumber && typeof billNumber === 'string' && billNumber.startsWith(`${prefix}-`)) {
+          const numberPart = billNumber.replace(`${prefix}-`, '');
+          
+          if (/^\d{3}$/.test(numberPart)) {
+            const num = parseInt(numberPart, 10);
+            if (!isNaN(num)) {
+              numbers.push(num);
+              addDebugMessage(`Found ${prefix} bill: ${billNumber} (number: ${num})`, 'info');
+            }
+          }
         }
       }
       
-      const nextNumber = lastNumber + 1;
-      const formattedNumber = String(nextNumber).padStart(3, '0');
-      const packingNumber = `PL-${formattedNumber}`;
-      
-      addDebugMessage(`Generated new packing number: ${packingNumber}`, 'success');
-      return packingNumber;
-      
-    } catch (error) {
-      console.error("Error getting next packing number:", error);
-      addDebugMessage(`Error: ${error.message}`, 'error');
-      const fallbackNumber = `PL-001`;
-      showToast(`Could not fetch from sheet, using ${fallbackNumber}`, "warning");
-      return fallbackNumber;
+      if (numbers.length > 0) {
+        lastNumber = Math.max(...numbers);
+        addDebugMessage(`Found ${numbers.length} ${prefix} bills. Last number: ${lastNumber}`, 'success');
+      }
     }
-  };
+    
+    const nextNumber = lastNumber + 1;
+    const formattedNumber = String(nextNumber).padStart(3, '0');
+    const packingNumber = `${prefix}-${formattedNumber}`;
+    
+    addDebugMessage(`Generated new ${prefix} number: ${packingNumber}`, 'success');
+    return packingNumber;
+    
+  } catch (error) {
+    console.error("Error getting next packing number:", error);
+    addDebugMessage(`Error: ${error.message}`, 'error');
+    const fallbackNumber = `${prefix}-001`;
+    showToast(`Could not fetch from sheet, using ${fallbackNumber}`, "warning");
+    return fallbackNumber;
+  }
+};
   
   // ==================== GOOGLE SHEETS STORAGE FUNCTIONS ====================
   
@@ -434,7 +502,56 @@ const saveBillToDraftSheet = async (billData) => {
 const handleFinalAction = (action) => {
   setIsConfirmModalOpen(false);
   
-  if (action === 'final') {
+  if (action === 'final') {const saveBillToDraftSheet = async (billData) => {
+  try {
+    setSavingToSheet(true);
+    setProcessingStage('sheet');
+    addDebugMessage("Saving NEW draft to Google Sheets...");
+    
+    // Ensure we're creating a new draft
+    const draftData = {
+      ...billData,
+      preparedBy: preparedBy,
+      preparedByRole: userRole,
+      preparedByEmail: userEmail,
+      preparedAt: new Date().toISOString(),
+      status: 'DRAFT',
+      documentType: 'NEW_DRAFT',
+      isNewDraft: true
+    };
+    
+    // Use 'new_draft' type to ensure Apps Script creates a new entry with sequential number
+    const encodedData = encodeURIComponent(JSON.stringify(draftData));
+    const urlEncodedData = `data=${encodedData}&type=new_draft`;
+    
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: urlEncodedData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      addDebugMessage(`✅ New draft created: ${result.billNumber}`, 'success');
+      showToast(`New draft created with ID: ${result.billNumber}`, "success");
+      return true;
+    } else {
+      throw new Error(result.error);
+    }
+    
+  } catch (error) {
+    console.error("Error saving draft:", error);
+    addDebugMessage(`❌ Failed to save draft: ${error.message}`, 'error');
+    showToast("Failed to save draft", "error");
+    return false;
+  } finally {
+    setSavingToSheet(false);
+    if (processingStage === 'sheet') setProcessingStage(null);
+  }
+};
     setTempBillData({ ...billForm });
     setIsPackingMaterialsModalOpen(true);
   } else if (action === 'draft') {
@@ -443,15 +560,17 @@ const handleFinalAction = (action) => {
   }
 };
 
-// NEW FUNCTION: Save as draft
 const handleSaveAsDraft = async () => {
   if (!tempBillDataForDraft) return;
   
-  const packingNumber = await getNextPackingNumber();
+  // Get the next sequential draft number
+  const draftNumber = await getNextDraftNumber();
+  
+  addDebugMessage(`Creating new draft with sequential number: ${draftNumber}`, 'info');
   
   const draftData = {
-    billNumber: packingNumber,
-    packingNumber: packingNumber,
+    billNumber: draftNumber,
+    packingNumber: draftNumber,
     partyName: selectedPartyState?.name || tempBillDataForDraft.partyName,
     billDate: tempBillDataForDraft.billDate,
     dueDate: tempBillDataForDraft.dueDate,
@@ -476,7 +595,7 @@ const handleSaveAsDraft = async () => {
     preparedByRole: userRole,
     preparedByEmail: userEmail,
     status: 'DRAFT',
-    documentType: 'DRAFT'
+    documentType: 'NEW_DRAFT'
   };
   
   const saved = await saveBillToDraftSheet(draftData);
@@ -487,6 +606,7 @@ const handleSaveAsDraft = async () => {
     
     if (onSubmit) onSubmit(draftData);
     
+    // Reset form after saving draft
     setBillForm({
       partyName: selectedParty?.name || "",
       billDate: new Date().toISOString().split('T')[0],
@@ -494,14 +614,23 @@ const handleSaveAsDraft = async () => {
       items: [],
       notes: ""
     });
+    
     if (!selectedParty) setSelectedPartyState(null);
+    
     setCurrentProduct({
       barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
       looseOperation: "add",
       brand: "", item: "", quantity: 1, totalPieces: "",
       colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
     });
+    
     setTempBillDataForDraft(null);
+    
+    // Clear editing flags if any
+    setIsEditingExistingDraft(false);
+    setExistingDraftNumber(null);
+    
+    showToast(`New draft ${draftNumber} created successfully!`, 'success');
     
     if (barcodeInputRef.current) barcodeInputRef.current.focus();
     await fetchLotSummary();
@@ -513,7 +642,8 @@ const handleSaveAsDraft = async () => {
 const handleFinalSubmissionWithMaterials = async (materials) => {
   if (!tempBillData) return;
   
-  const packingNumber = await getNextPackingNumber();
+  // Use 'PL' prefix for Final Bills (Packing List)
+  const packingNumber = await getNextPackingNumber('PL');
   
   // Use the materials passed from the modal, not the state
   const packingDataForStorage = {
@@ -1023,7 +1153,7 @@ const fetchLotSummaryWithData = async (allProductData) => {
       const brandIndicators = [
         'ADIDAS', 'NIKE', 'PUMA', 'REEBOK', 'UNDERARMOUR', 'GUCCI', 'LOUISVUITTON',
         'BALENCIAGA', 'ESSENTIALS', 'AMIRI', 'OFFWHITE', 'DIESEL', 'H&M', 'ZARA',
-        'GIRLISH', 'R.L.POLO', 'LACOSTE', 'BROOKSBROTHERS', 'POLO', 'TOMMY', 'CALVINKLEIN'
+        'GIRLISH', 'R.L.POLO', 'LACOSTE', 'BROOKSBROTHERS', 'POLO', 'TOMMY', 'CALVINKLEIN','GYMSHARK','HERMES','DIOR','ESSENTIAL','JORDAN','HOLISTER',
       ];
       
       let brandIndex = -1;
@@ -1887,7 +2017,7 @@ const PackingMaterialsModal = () => {
     setTimeout(() => toast.remove(), 3000);
   };
   
- const generatePackingList = async (packingData) => {
+const generatePackingList = async (packingData) => {
   if (!packingData || !packingData.items || packingData.items.length === 0) {
     console.error("Invalid packing data");
     setGeneratingPDF(false);
@@ -1938,46 +2068,183 @@ const PackingMaterialsModal = () => {
       doc.setTextColor(0, 0, 0);
       yPos += 12;
 
-      doc.rect(leftMargin, yPos, contentWidth, 50);
+      // Add Bill To information centered (without prefix)
+      const partyName = packingData.partyName || 'N/A';
+      const maxWidth = contentWidth;
+      const billToTextWidth = doc.getTextWidth(partyName);
       
-      const midPoint = leftMargin + (contentWidth * 0.6);
-      doc.line(midPoint, yPos, midPoint, yPos + 50);
-
       doc.setFont("times", "bold");
-      doc.setFontSize(10);
-      doc.text(`Date :-  ${packingData.billDate || new Date().toLocaleDateString()}`, leftMargin + 3, yPos + 7);
-      doc.text(`Order Reference :-  ${packingData.orderReference || 'N/A'}`, leftMargin + 3, yPos + 15);
-      doc.text(`Bill to :-  ${packingData.partyName || 'N/A'}`, leftMargin + 3, yPos + 23);
-      doc.text(`Document No :-  ${packingData.packingNumber || 'N/A'}`, leftMargin + 3, yPos + 31);
-       doc.text(`Packing Materials :-`, midPoint + 3, yPos + 39);
-      const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
-      const materialsText = `${packingMaterials.totalBoxes || 0} Boxes, ${packingMaterials.totalBags || 0} Bags, ${packingMaterials.totalPolybags || 0} Polybags`;
-      doc.text(materialsText, midPoint + 35, yPos + 39);
-
-      doc.setFont("times", "bold");
-      doc.setFontSize(10);
-      
-      doc.text(`Total Lots :-`, midPoint + 3, yPos + 7);
-      doc.text(uniqueLots.toString(), midPoint + 35, yPos + 7);
-      
-      doc.text(`Total Items :-`, midPoint + 3, yPos + 15);
-      doc.text(totalItems.toString(), midPoint + 35, yPos + 15);
-      
-      doc.text(`Total Qty :-`, midPoint + 3, yPos + 23);
-      doc.text(totalQuantity.toString(), midPoint + 35, yPos + 23);
-      
-      doc.text(`Total Sets :-`, midPoint + 3, yPos + 31);
-      doc.text(totalSets.toString(), midPoint + 35, yPos + 31);
-      
-      // Add packing materials information
-     
-      
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`Generated by: ${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, leftMargin + 3, yPos + 46);
+      doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
+      
+      if (billToTextWidth > maxWidth) {
+        let remainingName = partyName;
+        let lines = [];
+        
+        while (remainingName.length > 0) {
+          let line = "";
+          for (let i = 0; i < remainingName.length; i++) {
+            const testLine = line + remainingName[i];
+            if (doc.getTextWidth(testLine) <= maxWidth) {
+              line = testLine;
+            } else {
+              break;
+            }
+          }
+          lines.push(line);
+          remainingName = remainingName.substring(line.length);
+        }
+        
+        for (let i = 0; i < lines.length; i++) {
+          doc.text(lines[i], pageWidth / 2, yPos, { align: "center" });
+          yPos += 6;
+        }
+        yPos += 2;
+      } else {
+        doc.text(partyName, pageWidth / 2, yPos, { align: "center" });
+        yPos += 8;
+      }
+      
+      // Draw the main box - equally divided (50% each side)
+      const boxHeight = 38; // Reduced from 50 to 38 for tighter spacing
+      doc.rect(leftMargin, yPos, contentWidth, boxHeight);
+      
+      // Split exactly in the middle
+      const midPoint = leftMargin + (contentWidth / 2);
+      doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
 
-      return yPos + 60;
+      // LEFT SIDE CONTENT - Tighter spacing (6mm between rows)
+      const leftLabelX = leftMargin + 5;
+      const leftValueX = leftMargin + 38;
+      const leftMaxWidth = midPoint - leftValueX - 3;
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
+      
+      // Row 1 - Date (yPos + 6 instead of +8)
+      doc.text("Date", leftLabelX, yPos + 6);
+      doc.text(":", leftLabelX + 18, yPos + 6);
+      doc.setFont("times", "normal");
+      doc.text(`${packingData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 6);
+      
+      // Row 2 - Order Reference (yPos + 12 instead of +16)
+      doc.setFont("times", "bold");
+      doc.text("Order Ref", leftLabelX, yPos + 12);
+      doc.text(":", leftLabelX + 18, yPos + 12);
+      doc.setFont("times", "normal");
+      let orderRef = `${packingData.orderReference || 'N/A'}`;
+      if (doc.getTextWidth(orderRef) > leftMaxWidth) {
+        orderRef = orderRef.substring(0, 20) + "...";
+      }
+      doc.text(orderRef, leftValueX, yPos + 12);
+      
+      // Row 3 - Document No (yPos + 18 instead of +24)
+      doc.setFont("times", "bold");
+      doc.text("Doc No", leftLabelX, yPos + 18);
+      doc.text(":", leftLabelX + 18, yPos + 18);
+      doc.setFont("times", "normal");
+      doc.text(`${packingData.packingNumber || 'N/A'}`, leftValueX, yPos + 18);
+      
+      // Row 4 - Generated by (yPos + 24 instead of +32)
+      doc.setFont("times", "bold");
+      doc.text("Generated By", leftLabelX, yPos + 24);
+      doc.text(":", leftLabelX + 18, yPos + 24);
+      doc.setFont("times", "normal");
+      const preparedByText = `${packingData.preparedBy || preparedBy}`;
+      const preparedByRole = `${packingData.preparedByRole || userRole}`;
+      const fullPreparedText = `${preparedByText} (${preparedByRole})`;
+      
+      if (doc.getTextWidth(fullPreparedText) > leftMaxWidth) {
+        doc.text(preparedByText, leftValueX, yPos + 24);
+        doc.text(`(${preparedByRole})`, leftValueX, yPos + 30);
+      } else {
+        doc.text(fullPreparedText, leftValueX, yPos + 24);
+      }
+      
+      // Row 5 - Packing Materials (yPos + 32 instead of +44)
+      doc.setFont("times", "bold");
+      doc.text("Packing Materials", leftLabelX, yPos + 32);
+      doc.text(":", leftLabelX + 18, yPos + 32);
+      doc.setFont("times", "normal");
+      
+      const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
+      const materialParts = [];
+      
+      if (packingMaterials.totalBoxes > 0) {
+        materialParts.push(`${packingMaterials.totalBoxes} Box${packingMaterials.totalBoxes !== 1 ? 'es' : ''}`);
+      }
+      if (packingMaterials.totalBags > 0) {
+        materialParts.push(`${packingMaterials.totalBags} Bag${packingMaterials.totalBags !== 1 ? 's' : ''}`);
+      }
+      if (packingMaterials.totalPolybags > 0) {
+        materialParts.push(`${packingMaterials.totalPolybags} Polybag${packingMaterials.totalPolybags !== 1 ? 's' : ''}`);
+      }
+      
+      const materialsText = materialParts.length > 0 ? materialParts.join(', ') : 'None';
+      
+      if (doc.getTextWidth(materialsText) > leftMaxWidth) {
+        let remainingText = materialsText;
+        let currentY = yPos + 32;
+        while (remainingText.length > 0) {
+          let line = "";
+          for (let i = 0; i < remainingText.length; i++) {
+            const testLine = line + remainingText[i];
+            if (doc.getTextWidth(testLine) <= leftMaxWidth) {
+              line = testLine;
+            } else {
+              break;
+            }
+          }
+          doc.text(line, leftValueX, currentY);
+          remainingText = remainingText.substring(line.length);
+          currentY += 5;
+        }
+      } else {
+        doc.text(materialsText, leftValueX, yPos + 32);
+      }
+
+      // RIGHT SIDE CONTENT - Tighter spacing (6mm between rows)
+      const rightLabelX = midPoint + 5;
+      const rightValueX = midPoint + 35;
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
+      
+      // Row 1 - Total Lots (yPos + 6)
+      doc.text("Total Lots", rightLabelX, yPos + 6);
+      doc.text(":", rightLabelX + 18, yPos + 6);
+      doc.setFont("times", "normal");
+      doc.text(uniqueLots.toString(), rightValueX, yPos + 6);
+      
+      // Row 2 - Total Items (yPos + 12)
+      doc.setFont("times", "bold");
+      doc.text("Total Items", rightLabelX, yPos + 12);
+      doc.text(":", rightLabelX + 18, yPos + 12);
+      doc.setFont("times", "normal");
+      doc.text(totalItems.toString(), rightValueX, yPos + 12);
+      
+      // Row 3 - Total Quantity (yPos + 18)
+      doc.setFont("times", "bold");
+      doc.text("Total Qty", rightLabelX, yPos + 18);
+      doc.text(":", rightLabelX + 18, yPos + 18);
+      doc.setFont("times", "normal");
+      doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 18);
+      
+      // Row 4 - Total Sets (yPos + 24)
+      doc.setFont("times", "bold");
+      doc.text("Total Sets", rightLabelX, yPos + 24);
+      doc.text(":", rightLabelX + 18, yPos + 24);
+      doc.setFont("times", "normal");
+      doc.text(totalSets.toString(), rightValueX, yPos + 24);
+      
+      // Row 5 - Total Value (yPos + 32)
+      doc.setFont("times", "bold");
+      doc.text("Total Value", rightLabelX, yPos + 32);
+      doc.text(":", rightLabelX + 18, yPos + 32);
+      doc.setFont("times", "normal");
+      doc.text("To be calculated", rightValueX, yPos + 32);
+
+      return yPos + boxHeight + 5;
     };
 
     const drawTableHeader = (yPos, docType) => {
@@ -2262,7 +2529,6 @@ const PackingMaterialsModal = () => {
     }, 500);
   }
 };
-
   useEffect(() => {
     if (debugContainerRef.current) {
       debugContainerRef.current.scrollTop = debugContainerRef.current.scrollHeight;

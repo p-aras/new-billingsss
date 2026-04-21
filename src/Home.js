@@ -12,6 +12,7 @@ import PartyBill from "./PartyBill";
 import PartySelection from "./PartySelection";
 import GatepassGenerator from "./GatepassGenerator";
 import Login from "./Login";
+import DraftPackingList from "./DraftPackingList";
 
 function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -362,26 +363,17 @@ function Home() {
       lightColor: "#F3E5F5"
     },
     // Add this to your navigationCards array (around line 315)
-{
-  id: "draft-packing",
-  title: "Draft Packing List",
-  icon: "📝",
-  description: "Create and manage draft packing lists before final dispatch",
-  theoreticalInfo: "Create preliminary packing lists, review items, make changes, and convert to final dispatch when ready. Perfect for planning and approval workflows.",
-  stats: "Save drafts for later processing",
-  color: "#607D8B",
-  lightColor: "#ECEFF1"
-},
-    // {
-    //   id: "sticker",
-    //   title: "Create Sticker",
-    //   icon: "🏷️",
-    //   description: "Design custom labels for branding, warnings, and shipping instructions",
-    //   theoreticalInfo: "Create weather-resistant stickers with custom text, logos, and barcodes for product identification.",
-    //   stats: "Print-ready sticker designs",
-    //   color: "#E91E63",
-    //   lightColor: "#FCE4EC"
-    // },
+  {
+    id: "draft-packing",
+    title: "Draft Packing List",
+    icon: "📝",
+    description: "Create and manage draft packing lists before final dispatch",
+    theoreticalInfo: "Create preliminary packing lists, review items, make changes, and convert to final dispatch when ready.",
+    stats: "Save drafts for later processing",
+    color: "#607D8B",
+    lightColor: "#ECEFF1"
+  },
+    
     {
       id: "gatepass",
       title: "Gatepass Creation",
@@ -404,82 +396,88 @@ function Home() {
     return <SplashScreen onFinish={handleSplashFinish} duration={3000} />;
   }
 
-  const renderComponent = () => {
-    switch(activeComponent) {
-      case "barcode":
-        return <BarcodeGenerator onBack={() => setActiveComponent("dashboard")} />;
-      case "barcode-scanner":
-        return <BarcodeScanner onBack={() => setActiveComponent("dashboard")} />;
-      case "party":
-        return (
-          <PartyProfile 
-            parties={parties}
-            partyData={partyData}
-            setPartyData={setPartyData}
-            onSubmit={handlePartyProfileSubmit}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
-      case "party-bill-selection":
-        return (
-          <PartySelection 
-            parties={parties}
-            onSelectParty={handlePartySelect}
-            onBack={() => setActiveComponent("dashboard")}
-            onAddParty={handleAddParty}
-          />
-        );
-      // In Home.js, find the party-bill case in renderComponent:
-case "party-bill":
-  return (
-    <PartyBill 
-      parties={parties}
-      bills={bills}
-      selectedParty={selectedParty}
-      onSubmit={handleBillSubmit}
-      onBack={handleBackFromBill}
-      currentUser={user}  // Add this line to pass user data
-    />
-  );
-      case "packing":
-        return (
-          <PackingCopy 
-            packingData={packingData}
-            setPackingData={setPackingData}
-            onSubmit={handlePackingCopySubmit}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
-      case "dispatch":
-        return (
-          <DispatchDetails 
-            recentDispatches={recentDispatches}
-            updateDispatchStatus={updateDispatchStatus}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
-      case "sticker":
-        return (
-          <StickerGenerator
-            stickerData={stickerData}
-            setStickerData={setStickerData}
-            onSubmit={handleStickerSubmit}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
-      case "gatepass":
-        return (
-          <GatepassGenerator
-            parties={parties}
-            gatepasses={gatepasses}
-            onSubmit={handleGatepassSubmit}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
-      default:
-        return renderDashboard();
-    }
-  };
+const renderComponent = () => {
+  switch(activeComponent) {
+    case "barcode":
+      return <BarcodeGenerator onBack={() => setActiveComponent("dashboard")} />;
+    case "barcode-scanner":
+      return <BarcodeScanner onBack={() => setActiveComponent("dashboard")} />;
+    case "party":
+      return (
+        <PartyProfile 
+          parties={parties}
+          partyData={partyData}
+          setPartyData={setPartyData}
+          onSubmit={handlePartyProfileSubmit}
+          onBack={() => setActiveComponent("dashboard")}
+        />
+      );
+    case "party-bill-selection":
+      return (
+        <PartySelection 
+          parties={parties}
+          onSelectParty={handlePartySelect}
+          onBack={() => setActiveComponent("dashboard")}
+          onAddParty={handleAddParty}
+        />
+      );
+    case "party-bill":
+      return (
+        <PartyBill 
+          parties={parties}
+          bills={bills}
+          selectedParty={selectedParty}
+          onSubmit={handleBillSubmit}
+          onBack={handleBackFromBill}
+          currentUser={user}
+        />
+      );
+    case "packing":
+      return (
+        <PackingCopy 
+          packingData={packingData}
+          setPackingData={setPackingData}
+          onSubmit={handlePackingCopySubmit}
+          onBack={() => setActiveComponent("dashboard")}
+        />
+      );
+    case "draft-packing":
+      return (
+        <DraftPackingList 
+          onBack={() => setActiveComponent("dashboard")}
+          parties={parties}
+        />
+      );
+    case "dispatch":
+      return (
+        <DispatchDetails 
+          recentDispatches={recentDispatches}
+          updateDispatchStatus={updateDispatchStatus}
+          onBack={() => setActiveComponent("dashboard")}
+        />
+      );
+    case "sticker":
+      return (
+        <StickerGenerator
+          stickerData={stickerData}
+          setStickerData={setStickerData}
+          onSubmit={handleStickerSubmit}
+          onBack={() => setActiveComponent("dashboard")}
+        />
+      );
+    case "gatepass":
+      return (
+        <GatepassGenerator
+          parties={parties}
+          gatepasses={gatepasses}
+          onSubmit={handleGatepassSubmit}
+          onBack={() => setActiveComponent("dashboard")}
+        />
+      );
+    default:
+      return renderDashboard();
+  }
+};
 
   const renderDashboard = () => {
     return (

@@ -25,7 +25,7 @@ const ISSUES_SHEET_ID = "1uo14nKO_yHu4AJ2rOgaJajuprcinj6xw1AUMFJ6_zYM";
 const ISSUES_TAB = "Issues";
 const BARCODE_SHEET_ID = "1dOCjNFwaAel5qun0_ZJVIGmREqjI76CJBBFIjM3NHv8";
 const BARCODE_TAB = "LotBarcodeData";
-const BARCODE_STORAGE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyi6x18iEqRg0Ix3MCflT4imi-cApGAfFc9KAzYDRmI07EyHbqnnr56cYbQr509uQK_/exec";
+const BARCODE_STORAGE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx_oG5Rou1cmyUiJQnpZo6IxW0n_NdSxMk-E3pjk31_IBzmkyKNdggsQ1rKuyFE10pe/exec";
 
 const MAX_RANGE = 'A1:Z';
 
@@ -373,35 +373,30 @@ async function saveLotToBarcodeStorage(lotData) {
   try {
     console.log('📤 [SAVE] Starting to save lot data to Apps Script:', lotData.lotNumber);
     
-    const formData = new URLSearchParams();
+    const formData = new FormData();
     formData.append('action', 'saveLotData');
     formData.append('data', JSON.stringify(lotData));
     
+    // Use no-cors mode - this will send the request but you won't read the response
     const response = await fetch(BARCODE_STORAGE_SCRIPT_URL, {
       method: 'POST',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      mode: 'no-cors',
       body: formData
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    // With no-cors, response is opaque and you can't read it
+    // Assume success if no error
+    console.log('✅ [SAVE] Request sent (no-cors mode)');
     
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log('✅ [SAVE] Successfully saved to sheet:', result);
-    } else {
-      console.error('❌ [SAVE] Failed to save:', result.message);
-    }
-    
-    return result;
+    // Since we can't read the response, return a "maybe success" status
+    return { 
+      success: true, 
+      message: 'Request sent. Check Google Sheet for confirmation.',
+      mode: 'no-cors'
+    };
     
   } catch (error) {
-    console.error('📤 [SAVE] Error saving lot data:', error);
+    console.error('📤 [SAVE] Error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -413,9 +408,22 @@ async function checkLotExists(lotNumber) {
     const result = await response.json();
     
     if (result.success && result.data?.exists) {
-      return result;
+      // Return full data including barcodeId
+      return {
+        success: true,
+        exists: true,
+        data: {
+          exists: true,
+          lotNumber: result.data.lotNumber,
+          barcodeId: result.data.barcodeId,
+          generatedDate: result.data.generatedDate,
+          totalStickers: result.data.totalStickers,
+          version: result.data.version
+        }
+      };
     }
     
+    // Also check the Google Sheet directly as fallback
     return await fetchBarcodeFromSheet(lotNumber);
     
   } catch (error) {
@@ -423,7 +431,6 @@ async function checkLotExists(lotNumber) {
     return await fetchBarcodeFromSheet(lotNumber);
   }
 }
-
 async function fetchBarcodeFromSheet(lotNumber) {
   try {
     const range = encodeURIComponent(`${BARCODE_TAB}!A:AF`);
@@ -443,6 +450,9 @@ async function fetchBarcodeFromSheet(lotNumber) {
     
     const headers = rows[0].map(h => norm(h).toLowerCase());
     const lotNumberCol = headers.findIndex(h => h.includes('lot number') || h === 'lot number');
+    const barcodeIdCol = headers.findIndex(h => h.includes('barcode id') || h === 'barcodeid');
+    const generatedDateCol = headers.findIndex(h => h.includes('generated date') || h === 'generateddate');
+    const totalStickersCol = headers.findIndex(h => h.includes('total stickers') || h === 'totalstickers');
     
     const searchLot = norm(lotNumber);
     
@@ -451,7 +461,17 @@ async function fetchBarcodeFromSheet(lotNumber) {
       const rowLotNumber = lotNumberCol !== -1 ? norm(row[lotNumberCol]) : '';
       
       if (rowLotNumber === searchLot) {
-        return { success: true, exists: true, data: { lotNumber: rowLotNumber, exists: true } };
+        return {
+          success: true,
+          exists: true,
+          data: {
+            exists: true,
+            lotNumber: rowLotNumber,
+            barcodeId: barcodeIdCol !== -1 ? row[barcodeIdCol] : null,
+            generatedDate: generatedDateCol !== -1 ? row[generatedDateCol] : null,
+            totalStickers: totalStickersCol !== -1 ? row[totalStickersCol] : null
+          }
+        };
       }
     }
     
@@ -484,6 +504,46 @@ async function updateLotPrintStatus(lotNumber) {
     return { success: false, error: error.message };
   }
 }
+// Add this component near the Lot Information section
+const ExistingBarcodeWarning = ({ existingBarcode, lotNumber }) => {
+  if (!existingBarcode || !existingBarcode.exists) return null;
+  
+  return (
+    <div className="existing-barcode-warning" style={{
+      backgroundColor: '#fee2e2',
+      border: '1px solid #fecaca',
+      borderRadius: '8px',
+      padding: '12px',
+      marginBottom: '16px',
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '12px'
+    }}>
+      <FiAlertTriangle style={{ color: '#dc2626', fontSize: '20px', flexShrink: 0 }} />
+      <div>
+        <div style={{ fontWeight: 'bold', color: '#991b1b', marginBottom: '4px' }}>
+          ⚠️ Barcode Already Generated!
+        </div>
+        <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
+          Lot {lotNumber} already has a barcode generated.
+          {existingBarcode.barcodeId && (
+            <div style={{ marginTop: '4px', fontFamily: 'monospace' }}>
+              Barcode ID: {existingBarcode.barcodeId}
+            </div>
+          )}
+          {existingBarcode.generatedDate && (
+            <div style={{ marginTop: '2px', fontSize: '11px' }}>
+              Generated on: {new Date(existingBarcode.generatedDate).toLocaleDateString()}
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize: '12px', marginTop: '8px', color: '#991b1d' }}>
+          Cannot generate new stickers for this lot.
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const testAppsScript = async () => {
   try {
@@ -1234,24 +1294,30 @@ export default function BarcodeGenerator() {
     return { barcodeId, barcodeImage };
   }, []);
 
-  const handleGenerateStickers = useCallback(async () => {
-    if (!matrix) {
-      alert('No lot data found. Please search for a valid lot first.');
-      return;
-    }
+const handleGenerateStickers = useCallback(async () => {
+  if (!matrix) {
+    alert('No lot data found. Please search for a valid lot first.');
+    return;
+  }
 
-    if (setsMode === 'manual' && (!manualSetsData || !manualSetsData.manualSets || manualSetsData.manualSets.length === 0)) {
-      alert('Please configure manual sets first.');
-      return;
-    }
+  // Check if barcode already exists before generating
+  if (existingBarcode && existingBarcode.exists) {
+    alert(`⚠️ Barcode already exists for Lot ${matrix.lotNumber}!\n\nBarcode ID: ${existingBarcode.barcodeId || 'Unknown'}\n\nCannot generate duplicate stickers.`);
+    return;
+  }
 
-    if (setsMode === 'auto' && setsCalculation.adjustedStickers === 0) {
-      alert('No stickers to generate.');
-      return;
-    }
+  if (setsMode === 'manual' && (!manualSetsData || !manualSetsData.manualSets || manualSetsData.manualSets.length === 0)) {
+    alert('Please configure manual sets first.');
+    return;
+  }
 
-    setShowLayoutDialog(true);
-  }, [matrix, setsCalculation.adjustedStickers, setsMode, manualSetsData]);
+  if (setsMode === 'auto' && setsCalculation.adjustedStickers === 0) {
+    alert('No stickers to generate.');
+    return;
+  }
+
+  setShowLayoutDialog(true);
+}, [matrix, setsCalculation.adjustedStickers, setsMode, manualSetsData, existingBarcode]);
 
 const handleLayoutSelect = useCallback(async (layout) => {
   setSelectedLayout(layout);
@@ -1937,91 +2003,106 @@ const handlePrintWithCount = useCallback(async (count) => {
   }, []);
 
   // OPTIMIZED SEARCH HANDLER
-  const handleSearch = async (e) => {
-    e?.preventDefault?.();
-    if (!canSearch) return;
+const handleSearch = async (e) => {
+  e?.preventDefault?.();
+  if (!canSearch) return;
 
-    setError('');
-    setMatrix(null);
-    setPackingInfo(null);
-    setLoading(true);
-    setLoadingStage('Initializing...');
-    setLoadingProgress(0);
-    setStickerPercentage(1);
-    setSelectedStickerType('standard');
-    setShowStickerPreview(false);
-    setGeneratedStickers([]);
-    setCurrentPage(0);
-    setBatchId(null);
-    setBatchBarcodeImages({});
-    setCachedBarcodeImage(null);
-    setSetsMode('auto');
-    setManualSetsData(null);
-    setCurrentSetData(null);
-    setSaveStatus(null);
-    setExistingBarcode(null);
-    setSelectedLayout(null);
-    setShowPreviewModal(false);
-    setHasError(false);
-    setCurrentVersion(null);
+  setError('');
+  setMatrix(null);
+  setPackingInfo(null);
+  setLoading(true);
+  setLoadingStage('Initializing...');
+  setLoadingProgress(0);
+  setStickerPercentage(1);
+  setSelectedStickerType('standard');
+  setShowStickerPreview(false);
+  setGeneratedStickers([]);
+  setCurrentPage(0);
+  setBatchId(null);
+  setBatchBarcodeImages({});
+  setCachedBarcodeImage(null);
+  setSetsMode('auto');
+  setManualSetsData(null);
+  setCurrentSetData(null);
+  setSaveStatus(null);
+  setExistingBarcode(null);
+  setSelectedLayout(null);
+  setShowPreviewModal(false);
+  setHasError(false);
+  setCurrentVersion(null);
 
-    if (abortRef.current) {
-      abortRef.current.abort();
-    }
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
+  if (abortRef.current) {
+    abortRef.current.abort();
+  }
+  const ctrl = new AbortController();
+  abortRef.current = ctrl;
 
-    try {
-      const lotNumber = norm(lotInput);
+  try {
+    const lotNumber = norm(lotInput);
+    
+    setLoadingStage('Checking existing barcode data...');
+    setLoadingProgress(5);
+    
+    // Check if barcode already exists for this lot
+    const existingLotData = await checkLotExists(lotNumber);
+    
+    if (existingLotData.success && existingLotData.data?.exists) {
+      setExistingBarcode(existingLotData.data);
       
-      setLoadingStage('Checking existing barcode data...');
-      setLoadingProgress(5);
-      const existingLotData = await checkLotExists(lotNumber);
-      if (existingLotData.success && existingLotData.data?.exists) {
-        setExistingBarcode(existingLotData.data);
-      }
+      // Show alert that barcode already exists
+      setSaveStatus({
+        saving: false,
+        success: false,
+        message: `⚠️ Barcode already exists for Lot ${lotNumber}! Cannot generate new stickers.`
+      });
       
-      setLoadingStage('Locating lot in index...');
-      setLoadingProgress(15);
-      
-      setLoadingStage('Fetching cutting matrix data...');
+      // Still load the matrix data for viewing
+      setLoadingStage('Loading lot data for viewing...');
       setLoadingProgress(30);
-      
       const matrixData = await fetchLotMatrixViaSheetsApi(lotNumber, ctrl.signal);
-      
-      setLoadingProgress(70);
-      
-      if (existingLotData.success && existingLotData.data?.exists) {
-        matrixData.existingBarcode = existingLotData.data;
-      }
-      
       setMatrix(matrixData);
       
-      setLoadingStage('Fetching packing information...');
-      setLoadingProgress(85);
-      const packing = await fetchPackingInfo(lotNumber, ctrl.signal);
-      if (packing) {
-        console.log('Packing info loaded:', packing);
-        setPackingInfo(packing);
-      } else {
-        console.log('No packing info found for lot:', lotNumber);
-      }
-      
       setLoadingProgress(100);
-      
-    } catch (err) {
-      console.error('❌ Search error:', err);
-      if (err.name !== 'AbortError') {
-        setError(err?.message || "Failed to fetch data.");
-        setHasError(true);
-      }
-    } finally {
       setLoading(false);
-      setLoadingProgress(0);
-      setLoadingStage('');
+      return; // Stop here - don't allow sticker generation
     }
-  };
-
+    
+    setLoadingStage('Locating lot in index...');
+    setLoadingProgress(15);
+    
+    setLoadingStage('Fetching cutting matrix data...');
+    setLoadingProgress(30);
+    
+    const matrixData = await fetchLotMatrixViaSheetsApi(lotNumber, ctrl.signal);
+    
+    setLoadingProgress(70);
+    
+    setMatrix(matrixData);
+    
+    setLoadingStage('Fetching packing information...');
+    setLoadingProgress(85);
+    const packing = await fetchPackingInfo(lotNumber, ctrl.signal);
+    if (packing) {
+      console.log('Packing info loaded:', packing);
+      setPackingInfo(packing);
+    } else {
+      console.log('No packing info found for lot:', lotNumber);
+    }
+    
+    setLoadingProgress(100);
+    
+  } catch (err) {
+    console.error('❌ Search error:', err);
+    if (err.name !== 'AbortError') {
+      setError(err?.message || "Failed to fetch data.");
+      setHasError(true);
+    }
+  } finally {
+    setLoading(false);
+    setLoadingProgress(0);
+    setLoadingStage('');
+  }
+};
   const handleClear = () => {
     setLotInput('');
     setMatrix(null);
@@ -2341,6 +2422,7 @@ const handlePrintWithCount = useCallback(async (count) => {
               </div>
             </div>
           </div>
+          
 
           <div className="table-panel">
             <div className="panel-header">
@@ -2444,15 +2526,23 @@ const handlePrintWithCount = useCallback(async (count) => {
                 )}
                 
                 <div className="sticker-selection">
-                  <button 
-                    className="generate-button" 
-                    onClick={handleGenerateStickers} 
-                    disabled={isGeneratingStickers}
-                    aria-label="Generate Stickers"
-                  >
-                    {isGeneratingStickers ? <div className="spinner spinner-lg"></div> : <FiEye />}
-                    {isGeneratingStickers ? 'Generating...' : `Preview & Generate ${setsCalculation.adjustedStickers} Stickers`}
-                  </button>
+                 <button 
+  className="generate-button" 
+  onClick={handleGenerateStickers} 
+  disabled={isGeneratingStickers || (existingBarcode?.exists)}
+  aria-label="Generate Stickers"
+  style={{ 
+    opacity: existingBarcode?.exists ? '0.5' : '1',
+    cursor: existingBarcode?.exists ? 'not-allowed' : 'pointer'
+  }}
+>
+  {isGeneratingStickers ? <div className="spinner spinner-lg"></div> : <FiEye />}
+  {isGeneratingStickers 
+    ? 'Generating...' 
+    : existingBarcode?.exists 
+      ? 'Already Generated' 
+      : `Preview & Generate ${setsCalculation.adjustedStickers} Stickers`}
+</button>
                   
                   <button 
                     className="generate-button" 
