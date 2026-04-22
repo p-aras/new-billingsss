@@ -441,13 +441,14 @@ const renderComponent = () => {
           onBack={() => setActiveComponent("dashboard")}
         />
       );
-    case "draft-packing":
-      return (
-        <DraftPackingList 
-          onBack={() => setActiveComponent("dashboard")}
-          parties={parties}
-        />
-      );
+  case "draft-packing":
+  return (
+    <DraftPackingList 
+      onBack={() => setActiveComponent("dashboard")}
+      parties={parties}
+      currentUser={user}  // ← ADD THIS LINE
+    />
+  );
     case "dispatch":
       return (
         <DispatchDetails 

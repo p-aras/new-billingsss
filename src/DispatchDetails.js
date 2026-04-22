@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import './DispatchDetails.css';
 
 function DispatchDetails({ updateDispatchStatus, onBack }) {
   const [recentDispatches, setRecentDispatches] = useState([]);
@@ -7,8 +8,13 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   const [expandedBill, setExpandedBill] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedDate, setSelectedDate] = useState(''); // New state for date filter
+  
+  const [lotSearchTerm, setLotSearchTerm] = useState('');
+  const [lotSearchResults, setLotSearchResults] = useState([]);
+  const [showLotDetails, setShowLotDetails] = useState(false);
+  const [selectedLot, setSelectedLot] = useState(null);
 
-  // Your Google Sheets configuration
   const SPREADSHEET_ID = '1s8cXaMtG2XSxdOu1Ecve5aLI2MQcbMjVsn6Sih4hItk';
   const API_KEY = 'AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk';
   const SHEET_NAME = 'Bills';
@@ -20,7 +26,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   const fetchDispatchData = async () => {
     try {
       setLoading(true);
-      const range = `${SHEET_NAME}!A:G`;
+      const range = `${SHEET_NAME}!A:Z`;
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?key=${API_KEY}`;
       
       const response = await fetch(url);
@@ -34,7 +40,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       }
     } catch (err) {
       console.error('Error fetching data:', err);
-      setError('Failed to load dispatch data');
+      setError('Failed to load dispatch data: ' + err.message);
       setRecentDispatches([]);
     } finally {
       setLoading(false);
@@ -45,40 +51,192 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     const headers = sheetValues[0];
     const rows = sheetValues.slice(1);
     
+    const billNumberIndex = headers.findIndex(h => h === 'Bill Number');
+    const partyNameIndex = headers.findIndex(h => h === 'Party Name');
+    const billDateIndex = headers.findIndex(h => h === 'Bill Date');
+    const dueDateIndex = headers.findIndex(h => h === 'Due Date');
+    const orderReferenceIndex = headers.findIndex(h => h === 'Order Reference');
+    const itemsIndex = headers.findIndex(h => h === 'Items');
+    const statusIndex = headers.findIndex(h => h === 'Status');
+    const createdDateIndex = headers.findIndex(h => h === 'Created Date');
+    const billDataJsonIndex = headers.findIndex(h => h === 'Bill Data (JSON)' || h === 'BillData' || h === 'billData');
+    
     return rows.map((row, index) => {
       let billData = {};
-      const billDataColumnIndex = headers.findIndex(h => h === 'Bill Data (JSON)');
+      let items = [];
+      let parsedItems = [];
       
-      if (billDataColumnIndex !== -1 && row[billDataColumnIndex]) {
+      if (billDataJsonIndex !== -1 && row[billDataJsonIndex]) {
         try {
-          billData = JSON.parse(row[billDataColumnIndex]);
+          const jsonStr = row[billDataJsonIndex];
+          let parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+          while (typeof parsed === 'string') {
+            parsed = JSON.parse(parsed);
+          }
+          billData = parsed;
+          items = billData.items || [];
+          parsedItems = parseItems(items);
         } catch (e) {
           console.error('Error parsing Bill Data JSON:', e);
         }
       }
       
-      const totalQuantity = billData.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+      if (parsedItems.length === 0 && itemsIndex !== -1 && row[itemsIndex]) {
+        try {
+          parsedItems = parseItemsFromString(row[itemsIndex]);
+        } catch (e) {
+          console.error('Error parsing items from string:', e);
+        }
+      }
+      
+      if (parsedItems.length === 0) {
+        parsedItems = [{
+          barcode: row[billNumberIndex] || 'N/A',
+          lotNumber: 'LOT001',
+          brand: 'Generic',
+          description: 'Product',
+          sets: 0,
+          setsPerPcs: 1,
+          loosePcs: 0,
+          quantity: 0,
+          colors: [],
+          sizes: []
+        }];
+      }
+      
+      const totalQuantity = parsedItems.reduce((sum, item) => {
+        const qty = typeof item.quantity === 'number' ? item.quantity : (parseFloat(item.quantity) || 0);
+        return sum + qty;
+      }, 0);
+      
+      const totalSets = parsedItems.reduce((sum, item) => {
+        const sets = typeof item.sets === 'number' ? item.sets : (parseFloat(item.sets) || 0);
+        return sum + sets;
+      }, 0);
+      
+      const totalLoosePcs = parsedItems.reduce((sum, item) => {
+        const loosePcs = typeof item.loosePcs === 'number' ? item.loosePcs : (parseFloat(item.loosePcs) || 0);
+        return sum + loosePcs;
+      }, 0);
+      
+      // Parse bill date properly
+      let billDate = billData.billDate || row[billDateIndex] || '';
+      let formattedBillDate = billDate;
+      
+      // Try to parse and format the date for consistent filtering
+      if (billDate) {
+        try {
+          const dateObj = new Date(billDate);
+          if (!isNaN(dateObj.getTime())) {
+            formattedBillDate = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD format
+          }
+        } catch (e) {
+          console.error('Error parsing date:', e);
+        }
+      }
       
       return {
-        id: billData.billNumber || row[headers.findIndex(h => h === 'Bill Number')] || `dispatch-${index}`,
-        orderNo: billData.billNumber || row[headers.findIndex(h => h === 'Bill Number')] || '',
-        partyName: billData.partyName || row[headers.findIndex(h => h === 'Party Name')] || '',
-        billDate: billData.billDate || row[headers.findIndex(h => h === 'Bill Date')] || '',
-        dueDate: billData.dueDate || '',
-        orderReference: billData.orderReference || '',
-        items: billData.items || [],
-        itemsCount: billData.items?.length || 0,
+        id: billData.billNumber || row[billNumberIndex] || `dispatch-${index}`,
+        orderNo: billData.billNumber || row[billNumberIndex] || '',
+        partyName: billData.partyName || row[partyNameIndex] || '',
+        billDate: formattedBillDate,
+        billDateRaw: billDate,
+        dueDate: billData.dueDate || (dueDateIndex !== -1 ? row[dueDateIndex] : ''),
+        orderReference: billData.orderReference || (orderReferenceIndex !== -1 ? row[orderReferenceIndex] : ''),
+        items: parsedItems,
+        itemsCount: parsedItems.length,
         totalQuantity: totalQuantity,
+        totalSets: totalSets,
+        totalLoosePcs: totalLoosePcs,
         notes: billData.notes || '',
-        status: determineStatus(billData),
-        createdDate: billData.createdDate || row[headers.findIndex(h => h === 'Created Date')] || new Date().toISOString(),
+        status: billData.status || (statusIndex !== -1 ? row[statusIndex] : 'pending'),
+        createdDate: billData.createdDate || (createdDateIndex !== -1 ? row[createdDateIndex] : new Date().toISOString()),
         billData: billData
       };
     });
   };
 
-  const determineStatus = (billData) => {
-    return billData.status || 'pending';
+  const parseItems = (items) => {
+    if (!items || !Array.isArray(items)) return [];
+    
+    return items.map(item => ({
+      barcode: item.barcode || item.Barcode || 'N/A',
+      lotNumber: item.lotNumber || item.LotNumber || item.lot || 'N/A',
+      brand: item.brand || item.Brand || 'Generic',
+      description: item.description || item.Description || item.productName || 'Product',
+      sets: parseFloat(item.sets || item.Sets || 0),
+      setsPerPcs: parseFloat(item.setsPerPcs || item.SetsPerPcs || item.setsPerPiece || 1),
+      loosePcs: parseFloat(item.loosePcs || item.LoosePcs || 0),
+      quantity: parseFloat(item.quantity || item.Quantity || 0),
+      colors: Array.isArray(item.colors) ? item.colors : (item.colors ? [item.colors] : []),
+      sizes: Array.isArray(item.sizes) ? item.sizes : (item.sizes ? [item.sizes] : [])
+    }));
+  };
+
+  const parseItemsFromString = (itemsString) => {
+    try {
+      const parsed = JSON.parse(itemsString);
+      if (Array.isArray(parsed)) {
+        return parseItems(parsed);
+      }
+    } catch (e) {
+      console.log('Items not in JSON format:', itemsString);
+    }
+    return [];
+  };
+
+  const searchLotNumber = (lotNumber) => {
+    if (!lotNumber.trim()) {
+      setLotSearchResults([]);
+      setShowLotDetails(false);
+      return;
+    }
+
+    const results = [];
+    const lowerLotNumber = lotNumber.toLowerCase();
+
+    recentDispatches.forEach(dispatch => {
+      const matchingItems = dispatch.items.filter(item => 
+        item.lotNumber?.toLowerCase().includes(lowerLotNumber)
+      );
+
+      if (matchingItems.length > 0) {
+        const totalSetsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.sets) || 0), 0);
+        const totalLoosePcsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.loosePcs) || 0), 0);
+        const totalQuantityForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+
+        results.push({
+          dispatchId: dispatch.id,
+          orderNo: dispatch.orderNo,
+          partyName: dispatch.partyName,
+          status: dispatch.status,
+          billDate: dispatch.billDate,
+          items: matchingItems,
+          totalSets: totalSetsForLot,
+          totalLoosePcs: totalLoosePcsForLot,
+          totalQuantity: totalQuantityForLot,
+          lotNumber: lotNumber
+        });
+      }
+    });
+
+    setLotSearchResults(results);
+    setShowLotDetails(results.length > 0);
+    
+    if (results.length > 0 && results[0].items.length > 0) {
+      setSelectedLot(results[0].items[0].lotNumber);
+    }
+  };
+
+  const handleLotSearch = (e) => {
+    const value = e.target.value;
+    setLotSearchTerm(value);
+    if (value.length >= 2) {
+      searchLotNumber(value);
+    } else if (value.length === 0) {
+      setLotSearchResults([]);
+      setShowLotDetails(false);
+    }
   };
 
   const handleUpdateDispatchStatus = async (dispatchId, newStatus) => {
@@ -98,48 +256,75 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     }
   };
 
-  const toggleBillDetails = (dispatchId) => {
-    setExpandedBill(expandedBill === dispatchId ? null : dispatchId);
-  };
-
-  const getStatusColor = (status) => {
-    switch(status) {
-      case 'completed': return '#10b981';
-      case 'active': return '#3b82f6';
-      case 'pending': return '#f59e0b';
-      default: return '#6b7280';
+  const getStatusConfig = (status) => {
+    switch(status?.toLowerCase()) {
+      case 'completed': 
+        return { color: '#059669', bg: '#d1fae5', icon: '✓', label: 'Completed' };
+      case 'active': 
+        return { color: '#2563eb', bg: '#dbeafe', icon: '🚚', label: 'Active' };
+      case 'pending': 
+        return { color: '#d97706', bg: '#fef3c7', icon: '⏰', label: 'Pending' };
+      default: 
+        return { color: '#6b7280', bg: '#f3f4f6', icon: '📋', label: status || 'Unknown' };
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch(status) {
-      case 'completed': return '✓';
-      case 'active': return '▶';
-      case 'pending': return '○';
-      default: return '•';
-    }
+  // Clear date filter
+  const clearDateFilter = () => {
+    setSelectedDate('');
   };
 
+  // Filter dispatches based on search, status, and date
   const filteredDispatches = recentDispatches.filter(dispatch => {
-    const matchesSearch = dispatch.orderNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         dispatch.partyName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || dispatch.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    // Search filter
+    const matchesSearch = dispatch.orderNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         dispatch.partyName?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Status filter
+    const matchesStatus = statusFilter === 'all' || dispatch.status?.toLowerCase() === statusFilter;
+    
+    // Date filter
+    let matchesDate = true;
+    if (selectedDate) {
+      const dispatchDate = dispatch.billDate;
+      if (dispatchDate) {
+        // Compare dates in YYYY-MM-DD format
+        matchesDate = dispatchDate === selectedDate;
+      } else {
+        matchesDate = false;
+      }
+    }
+    
+    return matchesSearch && matchesStatus && matchesDate;
   });
 
   const stats = {
     total: recentDispatches.length,
-    pending: recentDispatches.filter(d => d.status === 'pending').length,
-    active: recentDispatches.filter(d => d.status === 'active').length,
-    completed: recentDispatches.filter(d => d.status === 'completed').length,
+    pending: recentDispatches.filter(d => d.status?.toLowerCase() === 'pending').length,
+    active: recentDispatches.filter(d => d.status?.toLowerCase() === 'active').length,
+    completed: recentDispatches.filter(d => d.status?.toLowerCase() === 'completed').length,
+    totalItems: recentDispatches.reduce((sum, d) => sum + (parseInt(d.itemsCount) || 0), 0),
+    totalQuantity: recentDispatches.reduce((sum, d) => sum + (parseFloat(d.totalQuantity) || 0), 0),
+    totalSets: recentDispatches.reduce((sum, d) => sum + (parseFloat(d.totalSets) || 0), 0),
+    totalLoosePcs: recentDispatches.reduce((sum, d) => sum + (parseFloat(d.totalLoosePcs) || 0), 0),
+  };
+
+  // Get unique dates for the date picker placeholder
+  const getDatePlaceholder = () => {
+    if (selectedDate) {
+      return `Filtering by: ${selectedDate}`;
+    }
+    return "Select date to filter bills...";
   };
 
   if (loading) {
     return (
-      <div className="dispatch-container">
-        <div className="loading-screen">
-          <div className="loading-spinner"></div>
-          <p>Loading dispatches...</p>
+      <div className="dispatch-modern-container">
+        <div className="dispatch-modern-loading">
+          <div className="dispatch-modern-loading-animation">
+            <div className="dispatch-modern-loading-truck">🚚</div>
+          </div>
+          <p className="dispatch-modern-loading-text">Loading dispatch data...</p>
         </div>
       </div>
     );
@@ -147,12 +332,13 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
 
   if (error) {
     return (
-      <div className="dispatch-container">
-        <div className="error-screen">
-          <div className="error-icon">⚠️</div>
+      <div className="dispatch-modern-container">
+        <div className="dispatch-modern-error">
+          <div className="dispatch-modern-error-icon">⚠️</div>
+          <h3>Oops! Something went wrong</h3>
           <p>{error}</p>
-          <button onClick={fetchDispatchData} className="btn-primary">
-            Retry
+          <button onClick={fetchDispatchData} className="dispatch-modern-btn-primary">
+            Try Again
           </button>
         </div>
       </div>
@@ -160,801 +346,547 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   }
 
   return (
-    <div className="dispatch-container">
-      {/* Header Section */}
-      <div className="dispatch-header">
-        <div className="header-left">
-          {onBack && (
-            <button onClick={onBack} className="btn-back">
-              ← Back
-            </button>
-          )}
-          <h1 className="dispatch-title">Dispatch Management</h1>
-        </div>
-        <div className="header-right">
-          <div className="stats-grid">
-            <div className="stat-card">
-              <span className="stat-label">Total</span>
-              <span className="stat-value">{stats.total}</span>
-            </div>
-            <div className="stat-card pending">
-              <span className="stat-label">Pending</span>
-              <span className="stat-value">{stats.pending}</span>
-            </div>
-            <div className="stat-card active">
-              <span className="stat-label">Active</span>
-              <span className="stat-value">{stats.active}</span>
-            </div>
-            <div className="stat-card completed">
-              <span className="stat-label">Completed</span>
-              <span className="stat-value">{stats.completed}</span>
+    <div className="dispatch-modern-container">
+      <div className="dispatch-modern-wrapper">
+        {/* Header Section */}
+        <div className="dispatch-modern-header">
+          <div className="dispatch-modern-header-left">
+            {onBack && (
+              <button onClick={onBack} className="dispatch-modern-back-btn">
+                <span className="dispatch-modern-back-icon">←</span>
+                <span>Back</span>
+              </button>
+            )}
+            <div className="dispatch-modern-title-section">
+              <div className="dispatch-modern-title-icon">📦</div>
+              <div>
+                <h1 className="dispatch-modern-title">Dispatch Management</h1>
+                <p className="dispatch-modern-subtitle">Track and manage all your dispatches in one place</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Filters Section */}
-      <div className="filters-section">
-        <div className="search-box">
-          <span className="search-icon">🔍</span>
-          <input
-            type="text"
-            placeholder="Search by bill number or party name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
+        {/* Stats Dashboard */}
+        <div className="dispatch-modern-stats-grid">
+          <div className="dispatch-modern-stat-card">
+            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-blue">
+              <span>📄</span>
+            </div>
+            <div className="dispatch-modern-stat-info">
+              <span className="dispatch-modern-stat-value">{stats.total}</span>
+              <span className="dispatch-modern-stat-label">Total Bills</span>
+            </div>
+          </div>
+          <div className="dispatch-modern-stat-card">
+            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-orange">
+              <span>⏰</span>
+            </div>
+            <div className="dispatch-modern-stat-info">
+              <span className="dispatch-modern-stat-value">{stats.pending}</span>
+              <span className="dispatch-modern-stat-label">Pending</span>
+            </div>
+          </div>
+          <div className="dispatch-modern-stat-card">
+            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-blue-light">
+              <span>🚚</span>
+            </div>
+            <div className="dispatch-modern-stat-info">
+              <span className="dispatch-modern-stat-value">{stats.active}</span>
+              <span className="dispatch-modern-stat-label">Active</span>
+            </div>
+          </div>
+          <div className="dispatch-modern-stat-card">
+            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-green">
+              <span>✓</span>
+            </div>
+            <div className="dispatch-modern-stat-info">
+              <span className="dispatch-modern-stat-value">{stats.completed}</span>
+              <span className="dispatch-modern-stat-label">Completed</span>
+            </div>
+          </div>
         </div>
-        <div className="filter-tabs">
-          {['all', 'pending', 'active', 'completed'].map(status => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`filter-tab ${statusFilter === status ? 'active' : ''}`}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
-          ))}
+
+        {/* Enhanced Metrics */}
+        <div className="dispatch-modern-metrics">
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">📊</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalItems}</div>
+              <div className="dispatch-modern-metric-label">Total Items</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">📦</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalQuantity}</div>
+              <div className="dispatch-modern-metric-label">Total Quantity</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">🔢</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalSets}</div>
+              <div className="dispatch-modern-metric-label">Total Sets</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">🔧</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalLoosePcs}</div>
+              <div className="dispatch-modern-metric-label">Loose Pieces</div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Dispatches List */}
-      <div className="dispatches-list">
-        {filteredDispatches.length > 0 ? (
-          filteredDispatches.map(dispatch => (
-            <div key={dispatch.id} className="dispatch-card">
-              <div className="card-header" onClick={() => toggleBillDetails(dispatch.id)}>
-                <div className="card-header-left">
-                  <div className="bill-number">
-                    <span className="bill-label">Bill No.</span>
-                    <span className="bill-value">{dispatch.orderNo}</span>
-                    {dispatch.orderReference && (
-                      <span className="bill-reference">Ref: {dispatch.orderReference}</span>
-                    )}
-                  </div>
-                  <div className="party-info">
-                    <span className="party-icon">🏢</span>
-                    <span>{dispatch.partyName}</span>
-                  </div>
-                </div>
-                <div className="card-header-right">
-                  <div className="status-badge" style={{ backgroundColor: getStatusColor(dispatch.status) }}>
-                    <span className="status-icon">{getStatusIcon(dispatch.status)}</span>
-                    <span>{dispatch.status}</span>
-                  </div>
-                  <button className="expand-btn">
-                    {expandedBill === dispatch.id ? '▲' : '▼'}
-                  </button>
-                </div>
-              </div>
+        {/* Lot Number Tracking */}
+        <div className="dispatch-modern-lot-section">
+          <div className="dispatch-modern-section-header">
+            <div className="dispatch-modern-section-title">
+              <span>🏷️</span>
+              <h3>Lot Number Tracking</h3>
+            </div>
+            <p className="dispatch-modern-section-desc">Search and track lots across all dispatches</p>
+          </div>
+          
+          <div className="dispatch-modern-search-wrapper">
+            <span className="dispatch-modern-search-icon">🔍</span>
+            <input
+              type="text"
+              placeholder="Enter lot number to track across all dispatches..."
+              value={lotSearchTerm}
+              onChange={handleLotSearch}
+              className="dispatch-modern-lot-input"
+            />
+            {lotSearchTerm && (
+              <button className="dispatch-modern-clear-btn" onClick={() => {
+                setLotSearchTerm('');
+                setLotSearchResults([]);
+                setShowLotDetails(false);
+              }}>
+                ✕
+              </button>
+            )}
+          </div>
 
-              <div className="card-body">
-                <div className="info-row">
-                  <div className="info-item">
-                    <span className="info-label">Bill Date</span>
-                    <span className="info-value">{dispatch.billDate ? new Date(dispatch.billDate).toLocaleDateString() : '-'}</span>
+          {showLotDetails && (
+            <div className="dispatch-modern-lot-results">
+              {lotSearchResults.length > 0 ? (
+                <>
+                  <div className="dispatch-modern-lot-summary">
+                    <div className="dispatch-modern-summary-header">
+                      <span className="dispatch-modern-found-count">📋 {lotSearchResults.length} Dispatch(es) Found</span>
+                      <span className="dispatch-modern-lot-highlight">Lot: {lotSearchTerm}</span>
+                    </div>
+                    <div className="dispatch-modern-lot-totals">
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Sets</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalSets, 0)}</strong>
+                      </div>
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Loose Pcs</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalLoosePcs, 0)}</strong>
+                      </div>
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Quantity</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalQuantity, 0)}</strong>
+                      </div>
+                    </div>
                   </div>
-                  <div className="info-item">
-                    <span className="info-label">Due Date</span>
-                    <span className="info-value">{dispatch.dueDate ? new Date(dispatch.dueDate).toLocaleDateString() : 'Not set'}</span>
-                  </div>
-                  <div className="info-item">
-                    <span className="info-label">Items</span>
-                    <span className="info-value">{dispatch.itemsCount} products</span>
-                  </div>
-                  <div className="info-item">
-                    <span className="info-label">Total Quantity</span>
-                    <span className="info-value highlight">{dispatch.totalQuantity} pcs</span>
-                  </div>
-                  <div className="info-item">
-                    <span className="info-label">Created</span>
-                    <span className="info-value">{new Date(dispatch.createdDate).toLocaleDateString()}</span>
-                  </div>
-                </div>
 
-                <div className="action-buttons">
-                  <button 
-                    className="btn-action btn-start"
-                    onClick={() => handleUpdateDispatchStatus(dispatch.id, "active")}
-                    disabled={dispatch.status !== "pending"}
-                  >
-                    <span>▶</span> Start Dispatch
-                  </button>
-                  <button 
-                    className="btn-action btn-complete"
-                    onClick={() => handleUpdateDispatchStatus(dispatch.id, "completed")}
-                    disabled={dispatch.status !== "active"}
-                  >
-                    <span>✓</span> Mark Complete
-                  </button>
-                </div>
-              </div>
-
-              {/* Expanded Details */}
-              {expandedBill === dispatch.id && (
-                <div className="card-expanded">
-                  <div className="expanded-content">
-                    <h3 className="expanded-title">Bill Details</h3>
-                    
-                    <div className="details-grid">
-                      <div className="detail-group">
-                        <label>Party Name</label>
-                        <p>{dispatch.partyName}</p>
-                      </div>
-                      <div className="detail-group">
-                        <label>Bill Date</label>
-                        <p>{dispatch.billDate}</p>
-                      </div>
-                      <div className="detail-group">
-                        <label>Due Date</label>
-                        <p>{dispatch.dueDate || 'Not specified'}</p>
-                      </div>
-                      <div className="detail-group">
-                        <label>Order Reference</label>
-                        <p>{dispatch.orderReference || 'N/A'}</p>
-                      </div>
-                      {dispatch.notes && (
-                        <div className="detail-group full-width">
-                          <label>Notes</label>
-                          <p>{dispatch.notes}</p>
+                  {lotSearchResults.map((result, idx) => (
+                    <div key={idx} className="dispatch-modern-lot-card">
+                      <div className="dispatch-modern-lot-card-header">
+                        <div className="dispatch-modern-lot-card-info">
+                          <span className="dispatch-modern-bill-no">🧾 {result.orderNo}</span>
+                          <span className="dispatch-modern-party-name">👤 {result.partyName}</span>
                         </div>
-                      )}
-                    </div>
-
-                    <h4 className="items-title">Items List</h4>
-                    <div className="items-table-container">
-                      <table className="items-table">
-                        <thead>
-                          <tr>
-                            <th>Barcode</th>
-                            <th>Lot Number</th>
-                            <th>Brand</th>
-                            <th>Description</th>
-                            <th>Sets</th>
-                            <th>Sets/Pcs</th>
-                            <th>Loose Pcs</th>
-                            <th>Quantity</th>
-                            <th>Colors</th>
-                            <th>Sizes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dispatch.items.map((item, idx) => (
-                            <tr key={idx}>
-                              <td><code>{item.barcode || '-'}</code></td>
-                              <td>{item.lotNumber || '-'}</td>
-                              <td>{item.brand || '-'}</td>
-                              <td>{item.description || '-'}</td>
-                              <td>{item.sets || '-'}</td>
-                              <td>{item.setsPerPcs || '-'}</td>
-                              <td>{item.loosePcs || 0}</td>
-                              <td className="quantity-cell">{item.quantity}</td>
-                              <td>{item.colors?.join(', ') || '-'}</td>
-                              <td>{item.sizes?.join(', ') || '-'}</td>
+                        <span className={`dispatch-modern-status-badge dispatch-modern-status-${result.status}`}>
+                          {result.status === 'pending' && '⏰'}
+                          {result.status === 'active' && '🚚'}
+                          {result.status === 'completed' && '✓'}
+                          {result.status}
+                        </span>
+                      </div>
+                      
+                      <div className="dispatch-modern-lot-table-wrapper">
+                        <table className="dispatch-modern-lot-table">
+                          <thead>
+                            <tr>
+                              <th>Barcode</th>
+                              <th>Lot Number</th>
+                              <th>Brand</th>
+                              <th>Description</th>
+                              <th>Sets</th>
+                              <th>Loose Pcs</th>
+                              <th>Quantity</th>
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr>
-                            <td colSpan="7" className="total-label">Total Quantity:</td>
-                            <td colSpan="3" className="total-value">{dispatch.totalQuantity} pcs</td>
-                          </tr>
-                        </tfoot>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {result.items.map((item, itemIdx) => (
+                              <tr key={itemIdx}>
+                                <td><code>{item.barcode}</code></td>
+                                <td><strong>{item.lotNumber}</strong></td>
+                                <td>{item.brand}</td>
+                                <td>{item.description}</td>
+                                <td>{parseFloat(item.sets) || 0}</td>
+                                <td>{parseFloat(item.loosePcs) || 0}</td>
+                                <td className="dispatch-modern-quantity-cell">{parseFloat(item.quantity) || 0}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td colSpan="4" className="dispatch-modern-total-label">Totals:</td>
+                              <td className="dispatch-modern-total-value">{result.totalSets}</td>
+                              <td className="dispatch-modern-total-value">{result.totalLoosePcs}</td>
+                              <td className="dispatch-modern-total-value">{result.totalQuantity}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     </div>
-                  </div>
+                  ))}
+                </>
+              ) : (
+                <div className="dispatch-modern-no-results">
+                  <span>🔍</span>
+                  <p>No dispatches found with lot number: <strong>{lotSearchTerm}</strong></p>
                 </div>
               )}
             </div>
-          ))
-        ) : (
-          <div className="empty-state">
-            <div className="empty-icon">📦</div>
-            <h3>No dispatches found</h3>
-            <p>Create your first packing copy to get started!</p>
+          )}
+        </div>
+
+        {/* Filters Section */}
+        <div className="dispatch-modern-filters">
+          <div className="dispatch-modern-search-filter">
+            <span className="dispatch-modern-filter-icon">🔍</span>
+            <input
+              type="text"
+              placeholder="Search by bill number or party name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="dispatch-modern-filter-input"
+            />
+          </div>
+          
+          {/* Date Filter - New Addition */}
+          <div className="dispatch-modern-date-filter">
+            <span className="dispatch-modern-filter-icon">📅</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="dispatch-modern-date-input"
+              placeholder="Filter by date"
+            />
+            {selectedDate && (
+              <button 
+                onClick={clearDateFilter}
+                className="dispatch-modern-clear-date-btn"
+                title="Clear date filter"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          
+          <div className="dispatch-modern-status-filters">
+            {['all', 'pending', 'active', 'completed'].map(status => {
+              const icon = status === 'all' ? '📊' : 
+                          status === 'pending' ? '⏰' : 
+                          status === 'active' ? '🚚' : '✓';
+              return (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  className={`dispatch-modern-status-btn ${statusFilter === status ? 'dispatch-modern-status-active' : ''}`}
+                >
+                  <span>{icon}</span>
+                  <span>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                  {status !== 'all' && (
+                    <span className="dispatch-modern-filter-count">
+                      {stats[status === 'pending' ? 'pending' : status === 'active' ? 'active' : 'completed']}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active Filters Display */}
+        {(selectedDate || searchTerm || statusFilter !== 'all') && (
+          <div className="dispatch-modern-active-filters">
+            <span className="dispatch-modern-active-filters-label">Active Filters:</span>
+            {selectedDate && (
+              <span className="dispatch-modern-filter-tag">
+                📅 Date: {selectedDate}
+                <button onClick={clearDateFilter} className="dispatch-modern-remove-filter">×</button>
+              </span>
+            )}
+            {searchTerm && (
+              <span className="dispatch-modern-filter-tag">
+                🔍 Search: {searchTerm}
+                <button onClick={() => setSearchTerm('')} className="dispatch-modern-remove-filter">×</button>
+              </span>
+            )}
+            {statusFilter !== 'all' && (
+              <span className="dispatch-modern-filter-tag">
+                {statusFilter === 'pending' ? '⏰' : statusFilter === 'active' ? '🚚' : '✓'} Status: {statusFilter}
+                <button onClick={() => setStatusFilter('all')} className="dispatch-modern-remove-filter">×</button>
+              </span>
+            )}
+            <button 
+              onClick={() => {
+                setSelectedDate('');
+                setSearchTerm('');
+                setStatusFilter('all');
+              }}
+              className="dispatch-modern-clear-all-filters"
+            >
+              Clear All
+            </button>
           </div>
         )}
+
+        {/* Filter Result Info */}
+        <div className="dispatch-modern-filter-info">
+          <span>Showing {filteredDispatches.length} of {recentDispatches.length} bills</span>
+          {selectedDate && (
+            <span className="dispatch-modern-date-badge">
+              📅 {selectedDate}
+            </span>
+          )}
+        </div>
+
+        {/* Dispatches Table */}
+        <div className="dispatch-modern-table-container">
+          <table className="dispatch-modern-table">
+            <thead>
+              <tr>
+                <th>Bill No.</th>
+                <th>Party Name</th>
+                <th>Bill Date</th>
+                <th>Due Date</th>
+                <th>Items</th>
+                <th>Total Qty</th>
+                <th>Sets</th>
+                <th>Loose Pcs</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDispatches.length > 0 ? (
+                filteredDispatches.map(dispatch => {
+                  const statusConfig = getStatusConfig(dispatch.status);
+                  const isExpanded = expandedBill === dispatch.id;
+                  
+                  return (
+                    <React.Fragment key={dispatch.id}>
+                      <tr className={`dispatch-modern-row ${isExpanded ? 'dispatch-modern-row-expanded' : ''}`}>
+                        <td>
+                          <span className="dispatch-modern-bill-number">{dispatch.orderNo}</span>
+                          {dispatch.orderReference && (
+                            <span className="dispatch-modern-ref-badge">{dispatch.orderReference}</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="dispatch-modern-party-cell">
+                            <span>👤</span>
+                            <span>{dispatch.partyName}</span>
+                          </div>
+                        </td>
+                        <td className="dispatch-modern-date-cell">{dispatch.billDate || '-'}</td>
+                        <td>{dispatch.dueDate ? new Date(dispatch.dueDate).toLocaleDateString() : '-'}</td>
+                        <td className="dispatch-modern-center">{dispatch.itemsCount}</td>
+                        <td className="dispatch-modern-center dispatch-modern-highlight">{dispatch.totalQuantity}</td>
+                        <td className="dispatch-modern-center">{dispatch.totalSets}</td>
+                        <td className="dispatch-modern-center">{dispatch.totalLoosePcs}</td>
+                        <td>
+                          <span className="dispatch-modern-status-badge" style={{ background: statusConfig.bg, color: statusConfig.color }}>
+                            <span>{statusConfig.icon}</span>
+                            {statusConfig.label}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="dispatch-modern-actions">
+                            <button 
+                              className="dispatch-modern-action-start"
+                              onClick={() => handleUpdateDispatchStatus(dispatch.id, "active")}
+                              disabled={dispatch.status !== "pending"}
+                              title="Start Dispatch"
+                            >
+                              ▶
+                            </button>
+                            <button 
+                              className="dispatch-modern-action-complete"
+                              onClick={() => handleUpdateDispatchStatus(dispatch.id, "completed")}
+                              disabled={dispatch.status !== "active"}
+                              title="Mark Complete"
+                            >
+                              ✓
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <button 
+                            className="dispatch-modern-expand-btn"
+                            onClick={() => setExpandedBill(isExpanded ? null : dispatch.id)}
+                          >
+                            {isExpanded ? '▲' : '▼'}
+                          </button>
+                        </td>
+                      </tr>
+                      
+                      {isExpanded && (
+                        <tr className="dispatch-modern-details-row">
+                          <td colSpan="11">
+                            <div className="dispatch-modern-details-content">
+                              <div className="dispatch-modern-details-header">
+                                <h4>📋 Bill Details</h4>
+                                <button className="dispatch-modern-details-action">
+                                  <span>👁️</span>
+                                  View Full Details
+                                </button>
+                              </div>
+                              
+                              <div className="dispatch-modern-details-grid">
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Bill Number</label>
+                                  <span>{dispatch.orderNo}</span>
+                                </div>
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Party Name</label>
+                                  <span>{dispatch.partyName}</span>
+                                </div>
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Bill Date</label>
+                                  <span>{dispatch.billDate || 'Not specified'}</span>
+                                </div>
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Due Date</label>
+                                  <span>{dispatch.dueDate || 'Not specified'}</span>
+                                </div>
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Order Reference</label>
+                                  <span>{dispatch.orderReference || 'N/A'}</span>
+                                </div>
+                                <div className="dispatch-modern-detail-item">
+                                  <label>Status</label>
+                                  <span className={`dispatch-modern-status-text dispatch-modern-status-${dispatch.status}`}>
+                                    {dispatch.status?.toUpperCase()}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <h5 className="dispatch-modern-items-title">📦 Items List ({dispatch.itemsCount} items)</h5>
+                              <div className="dispatch-modern-items-table-wrapper">
+                                <table className="dispatch-modern-items-table">
+                                  <thead>
+                                    <tr>
+                                      <th>#</th>
+                                      <th>Barcode</th>
+                                      <th>Lot Number</th>
+                                      <th>Brand</th>
+                                      <th>Description</th>
+                                      <th>Sets</th>
+                                      <th>Sets/Pcs</th>
+                                      <th>Loose Pcs</th>
+                                      <th>Quantity</th>
+                                      <th>Colors</th>
+                                      <th>Sizes</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {dispatch.items && dispatch.items.length > 0 ? (
+                                      dispatch.items.map((item, idx) => (
+                                        <tr key={idx}>
+                                          <td>{idx + 1}</td>
+                                          <td><code>{item.barcode || '-'}</code></td>
+                                          <td><strong>{item.lotNumber || '-'}</strong></td>
+                                          <td>{item.brand || '-'}</td>
+                                          <td className="dispatch-modern-desc-cell">{item.description || '-'}</td>
+                                          <td className="dispatch-modern-number-cell">{parseFloat(item.sets) || 0}</td>
+                                          <td className="dispatch-modern-number-cell">{parseFloat(item.setsPerPcs) || 1}</td>
+                                          <td className="dispatch-modern-number-cell">{parseFloat(item.loosePcs) || 0}</td>
+                                          <td className="dispatch-modern-qty-cell"><strong>{parseFloat(item.quantity) || 0}</strong></td>
+                                          <td>
+                                            {item.colors && item.colors.length > 0 ? (
+                                              <div className="dispatch-modern-tags">
+                                                {item.colors.map((color, i) => (
+                                                  <span key={i} className="dispatch-modern-color-tag">{color}</span>
+                                                ))}
+                                              </div>
+                                            ) : '-'}
+                                          </td>
+                                          <td>
+                                            {item.sizes && item.sizes.length > 0 ? (
+                                              <div className="dispatch-modern-tags">
+                                                {item.sizes.map((size, i) => (
+                                                  <span key={i} className="dispatch-modern-size-tag">{size}</span>
+                                                ))}
+                                              </div>
+                                            ) : '-'}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    ) : (
+                                      <tr>
+                                        <td colSpan="11" className="dispatch-modern-no-items">No items found</td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="dispatch-modern-summary-row">
+                                      <td colSpan="5" className="dispatch-modern-summary-label">Total Sets:</td>
+                                      <td colSpan="6" className="dispatch-modern-summary-value">{dispatch.totalSets || 0}</td>
+                                    </tr>
+                                    <tr className="dispatch-modern-summary-row">
+                                      <td colSpan="5" className="dispatch-modern-summary-label">Total Loose Pcs:</td>
+                                      <td colSpan="6" className="dispatch-modern-summary-value">{dispatch.totalLoosePcs || 0}</td>
+                                    </tr>
+                                    <tr className="dispatch-modern-summary-row">
+                                      <td colSpan="5" className="dispatch-modern-summary-label">Total Quantity:</td>
+                                      <td colSpan="6" className="dispatch-modern-summary-value">{dispatch.totalQuantity} pcs</td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="11" className="dispatch-modern-empty">
+                    <span>📦</span>
+                    <h3>No dispatches found</h3>
+                    <p>
+                      {selectedDate 
+                        ? `No bills found for date: ${selectedDate}` 
+                        : searchTerm 
+                        ? `No results matching "${searchTerm}"` 
+                        : "Create your first packing copy to get started!"}
+                    </p>
+                    {selectedDate && (
+                      <button onClick={clearDateFilter} className="dispatch-modern-btn-primary">
+                        Clear Date Filter
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      <style jsx>{`
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-
-        .dispatch-container {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          min-height: 100vh;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
-        }
-
-        /* Loading Screen */
-        .loading-screen {
-          background: white;
-          border-radius: 16px;
-          padding: 60px;
-          text-align: center;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.1);
-        }
-
-        .loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 3px solid #f3f3f3;
-          border-top: 3px solid #667eea;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        /* Error Screen */
-        .error-screen {
-          background: white;
-          border-radius: 16px;
-          padding: 60px;
-          text-align: center;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.1);
-        }
-
-        .error-icon {
-          font-size: 48px;
-          margin-bottom: 20px;
-        }
-
-        /* Header */
-        .dispatch-header {
-          background: white;
-          border-radius: 16px;
-          padding: 24px 32px;
-          margin-bottom: 24px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-          flex-wrap: wrap;
-          gap: 20px;
-        }
-
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .btn-back {
-          background: #f3f4f6;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          color: #4b5563;
-          transition: all 0.2s;
-        }
-
-        .btn-back:hover {
-          background: #e5e7eb;
-          transform: translateX(-2px);
-        }
-
-        .dispatch-title {
-          font-size: 28px;
-          font-weight: 700;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-          display: flex;
-          gap: 16px;
-        }
-
-        .stat-card {
-          background: #f9fafb;
-          padding: 12px 20px;
-          border-radius: 12px;
-          text-align: center;
-          min-width: 80px;
-          transition: transform 0.2s;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-2px);
-        }
-
-        .stat-card.pending { background: #fef3c7; }
-        .stat-card.active { background: #dbeafe; }
-        .stat-card.completed { background: #d1fae5; }
-
-        .stat-label {
-          display: block;
-          font-size: 12px;
-          color: #6b7280;
-          margin-bottom: 4px;
-        }
-
-        .stat-value {
-          display: block;
-          font-size: 24px;
-          font-weight: 700;
-          color: #1f2937;
-        }
-
-        /* Filters */
-        .filters-section {
-          background: white;
-          border-radius: 16px;
-          padding: 20px 24px;
-          margin-bottom: 24px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .search-box {
-          position: relative;
-          margin-bottom: 20px;
-        }
-
-        .search-icon {
-          position: absolute;
-          left: 16px;
-          top: 50%;
-          transform: translateY(-50%);
-          font-size: 18px;
-        }
-
-        .search-input {
-          width: 100%;
-          padding: 12px 16px 12px 48px;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          font-size: 14px;
-          transition: all 0.2s;
-        }
-
-        .search-input:focus {
-          outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .filter-tabs {
-          display: flex;
-          gap: 12px;
-        }
-
-        .filter-tab {
-          padding: 8px 20px;
-          border: 2px solid #e5e7eb;
-          background: white;
-          border-radius: 10px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          transition: all 0.2s;
-        }
-
-        .filter-tab:hover {
-          border-color: #667eea;
-          background: #f9fafb;
-        }
-
-        .filter-tab.active {
-          background: #667eea;
-          border-color: #667eea;
-          color: white;
-        }
-
-        /* Dispatch Cards */
-        .dispatches-list {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        .dispatch-card {
-          background: white;
-          border-radius: 16px;
-          overflow: hidden;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-          transition: all 0.3s;
-        }
-
-        .dispatch-card:hover {
-          box-shadow: 0 8px 16px rgba(0,0,0,0.15);
-          transform: translateY(-2px);
-        }
-
-        .card-header {
-          padding: 20px 24px;
-          background: linear-gradient(135deg, #f9fafb 0%, #ffffff 100%);
-          border-bottom: 1px solid #e5e7eb;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-
-        .card-header:hover {
-          background: linear-gradient(135deg, #f3f4f6 0%, #f9fafb 100%);
-        }
-
-        .card-header-left {
-          flex: 1;
-        }
-
-        .bill-number {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 8px;
-          flex-wrap: wrap;
-        }
-
-        .bill-label {
-          font-size: 12px;
-          color: #6b7280;
-          font-weight: 500;
-        }
-
-        .bill-value {
-          font-size: 18px;
-          font-weight: 700;
-          color: #1f2937;
-        }
-
-        .bill-reference {
-          font-size: 12px;
-          color: #6b7280;
-          background: #f3f4f6;
-          padding: 4px 8px;
-          border-radius: 6px;
-        }
-
-        .party-info {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #6b7280;
-          font-size: 14px;
-        }
-
-        .party-icon {
-          font-size: 16px;
-        }
-
-        .card-header-right {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .status-badge {
-          padding: 6px 12px;
-          border-radius: 20px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          color: white;
-          font-size: 13px;
-          font-weight: 500;
-        }
-
-        .expand-btn {
-          background: none;
-          border: none;
-          font-size: 20px;
-          cursor: pointer;
-          color: #9ca3af;
-          transition: color 0.2s;
-        }
-
-        .expand-btn:hover {
-          color: #667eea;
-        }
-
-        .card-body {
-          padding: 20px 24px;
-          border-bottom: 1px solid #e5e7eb;
-        }
-
-        .info-row {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          gap: 16px;
-          margin-bottom: 20px;
-        }
-
-        .info-item {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .info-label {
-          font-size: 11px;
-          font-weight: 600;
-          text-transform: uppercase;
-          color: #9ca3af;
-          letter-spacing: 0.5px;
-        }
-
-        .info-value {
-          font-size: 14px;
-          color: #374151;
-          font-weight: 500;
-        }
-
-        .info-value.highlight {
-          color: #667eea;
-          font-size: 18px;
-          font-weight: 700;
-        }
-
-        .action-buttons {
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn-action {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s;
-        }
-
-        .btn-start {
-          background: #dbeafe;
-          color: #3b82f6;
-        }
-
-        .btn-start:hover:not(:disabled) {
-          background: #3b82f6;
-          color: white;
-          transform: translateY(-1px);
-        }
-
-        .btn-complete {
-          background: #d1fae5;
-          color: #10b981;
-        }
-
-        .btn-complete:hover:not(:disabled) {
-          background: #10b981;
-          color: white;
-          transform: translateY(-1px);
-        }
-
-        .btn-action:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        /* Expanded Section */
-        .card-expanded {
-          padding: 24px;
-          background: #f9fafb;
-          border-top: 1px solid #e5e7eb;
-        }
-
-        .expanded-content {
-          max-width: 100%;
-          overflow-x: auto;
-        }
-
-        .expanded-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: #1f2937;
-          margin-bottom: 20px;
-        }
-
-        .details-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 16px;
-          margin-bottom: 24px;
-          padding: 16px;
-          background: white;
-          border-radius: 12px;
-        }
-
-        .detail-group {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .detail-group.full-width {
-          grid-column: 1 / -1;
-        }
-
-        .detail-group label {
-          font-size: 11px;
-          font-weight: 600;
-          text-transform: uppercase;
-          color: #9ca3af;
-          letter-spacing: 0.5px;
-        }
-
-        .detail-group p {
-          font-size: 14px;
-          color: #374151;
-          margin: 0;
-        }
-
-        .items-title {
-          font-size: 16px;
-          font-weight: 600;
-          color: #1f2937;
-          margin-bottom: 16px;
-        }
-
-        .items-table-container {
-          overflow-x: auto;
-          border-radius: 12px;
-          background: white;
-        }
-
-        .items-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 13px;
-        }
-
-        .items-table th {
-          background: #f3f4f6;
-          padding: 12px;
-          text-align: left;
-          font-weight: 600;
-          color: #374151;
-          border-bottom: 2px solid #e5e7eb;
-        }
-
-        .items-table td {
-          padding: 10px 12px;
-          border-bottom: 1px solid #e5e7eb;
-          color: #6b7280;
-        }
-
-        .items-table tbody tr:hover {
-          background: #f9fafb;
-        }
-
-        .quantity-cell {
-          font-weight: 700;
-          color: #667eea;
-        }
-
-        .items-table tfoot td {
-          background: #f3f4f6;
-          padding: 12px;
-          font-weight: 600;
-        }
-
-        .total-label {
-          text-align: right;
-          font-weight: 600;
-          color: #374151;
-        }
-
-        .total-value {
-          font-weight: 700;
-          color: #667eea;
-          font-size: 16px;
-        }
-
-        code {
-          font-family: 'Courier New', monospace;
-          font-size: 12px;
-          background: #f3f4f6;
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-
-        /* Empty State */
-        .empty-state {
-          background: white;
-          border-radius: 16px;
-          padding: 60px;
-          text-align: center;
-        }
-
-        .empty-icon {
-          font-size: 64px;
-          margin-bottom: 20px;
-        }
-
-        .empty-state h3 {
-          font-size: 20px;
-          color: #374151;
-          margin-bottom: 8px;
-        }
-
-        .empty-state p {
-          color: #9ca3af;
-        }
-
-        .btn-primary {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          margin-top: 20px;
-          transition: transform 0.2s;
-        }
-
-        .btn-primary:hover {
-          transform: translateY(-2px);
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-          .dispatch-container {
-            padding: 16px;
-          }
-          
-          .dispatch-header {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          
-          .stats-grid {
-            justify-content: space-around;
-          }
-          
-          .info-row {
-            grid-template-columns: 1fr;
-          }
-          
-          .filter-tabs {
-            flex-wrap: wrap;
-          }
-        }
-      `}</style>
     </div>
   );
 }

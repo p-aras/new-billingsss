@@ -73,12 +73,7 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
   const [selectedLotForSummary, setSelectedLotForSummary] = useState(null);
   // Add these with your other state variables
 // Add these with your other state variables
-const [packingMaterials, setPackingMaterials] = useState({
-  totalBoxes: 0,
-  totalBags: 0,
-  totalPolybags: 0
-});
-const [isPackingMaterialsModalOpen, setIsPackingMaterialsModalOpen] = useState(false);
+
 const [tempBillDataForDraft, setTempBillDataForDraft] = useState(null);
 const [isEditingExistingDraft, setIsEditingExistingDraft] = useState(false);
 const [existingDraftNumber, setExistingDraftNumber] = useState(null);
@@ -397,15 +392,7 @@ const saveBillToGoogleSheet = async (billData) => {
     setSavingToSheet(true);
     setProcessingStage('sheet');
     
-    // Debug: Check packing materials before saving
-    console.log("🔍 DEBUG - Bill Data before saving:", {
-      packingMaterials: billData.packingMaterials,
-      totalBoxes: billData.packingMaterials?.totalBoxes,
-      totalBags: billData.packingMaterials?.totalBags,
-      totalPolybags: billData.packingMaterials?.totalPolybags
-    });
-    
-    addDebugMessage(`Saving packing list to Google Sheets with: Boxes=${billData.packingMaterials?.totalBoxes || 0}, Bags=${billData.packingMaterials?.totalBags || 0}, Polybags=${billData.packingMaterials?.totalPolybags || 0}`, 'info');
+    addDebugMessage(`Saving ${billData.documentType || 'FINAL'} bill ...`, 'info');
     
     const billDataWithPreparer = {
       ...billData,
@@ -415,10 +402,11 @@ const saveBillToGoogleSheet = async (billData) => {
       preparedAt: new Date().toISOString()
     };
     
-    const encodedData = encodeURIComponent(JSON.stringify(billDataWithPreparer));
-    const urlEncodedData = `data=${encodedData}&type=final`;
+    // Determine type based on document status
+    const saveType = billData.status === 'DRAFT' ? 'draft' : 'final';
     
-    console.log("📦 Sending data:", urlEncodedData.substring(0, 500)); // Log first 500 chars
+    const encodedData = encodeURIComponent(JSON.stringify(billDataWithPreparer));
+    const urlEncodedData = `data=${encodedData}&type=${saveType}`;
     
     const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
@@ -431,8 +419,8 @@ const saveBillToGoogleSheet = async (billData) => {
     const result = await response.json();
     
     if (result.success) {
-      addDebugMessage(`✅ Packing list ${billData.packingNumber} saved`, 'success');
-      showToast(`Packing list saved to Google Sheets`, "success");
+      addDebugMessage(`✅ ${billData.documentType || 'FINAL'} bill ${billData.packingNumber} saved`, 'success');
+      showToast(`${billData.documentType || 'FINAL'} bill saved to Google Sheets`, "success");
       await fetchLotSummary();
       return true;
     } else {
@@ -442,7 +430,7 @@ const saveBillToGoogleSheet = async (billData) => {
   } catch (error) {
     console.error("Error saving to Google Sheets:", error);
     addDebugMessage(`❌ Failed to save: ${error.message}`, 'error');
-    showToast("Failed to save to Google Sheets, but PDF is downloaded", "warning");
+    showToast("Failed to save to Google Sheets", "error");
     return false;
   } finally {
     setSavingToSheet(false);
@@ -454,7 +442,7 @@ const saveBillToDraftSheet = async (billData) => {
   try {
     setSavingToSheet(true);
     setProcessingStage('sheet');
-    addDebugMessage("Saving draft to Google Sheets...");
+    addDebugMessage("Saving draft ..");
     
     const draftData = {
       ...billData,
@@ -497,63 +485,79 @@ const saveBillToDraftSheet = async (billData) => {
     if (processingStage === 'sheet') setProcessingStage(null);
   }
 };
-
+const DraftSavingOverlay = () => {
+  if (!savingToSheet && !generatingPDF) return null;
+  
+  let message = "Please wait while we save your draft...";
+  if (generatingPDF) {
+    message = "Generating DRAFT PDF...";
+  } else if (savingToSheet) {
+    message = "Saving to Google Sheets...";
+  }
+  
+  return (
+    <div className="blue-fixed-overlay" style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 10000,
+      backdropFilter: 'blur(3px)'
+    }}>
+      <div className="blue-saving-card" style={{
+        backgroundColor: 'white',
+        borderRadius: '16px',
+        padding: '30px',
+        textAlign: 'center',
+        minWidth: '300px',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
+      }}>
+        <div className="blue-saving-icon" style={{
+          fontSize: '48px',
+          marginBottom: '20px'
+        }}>
+          {generatingPDF ? '📄' : '💾'}
+        </div>
+        <h3 style={{ marginBottom: '10px', color: '#1e3a8a' }}>
+          {generatingPDF ? 'Generating DRAFT PDF' : 'Saving as Draft'}
+        </h3>
+        <p style={{ color: '#666', marginBottom: '20px' }}>
+          {message}
+        </p>
+        <div className="blue-progress-container" style={{
+          width: '100%',
+          height: '8px',
+          backgroundColor: '#e5e7eb',
+          borderRadius: '4px',
+          overflow: 'hidden'
+        }}>
+          <div className="blue-progress-bar-animated" style={{
+            width: '100%',
+            height: '100%',
+            backgroundColor: generatingPDF ? '#10b981' : '#3b82f6',
+            animation: 'loadingProgress 1.5s ease-in-out infinite'
+          }}></div>
+        </div>
+        <p style={{ color: '#999', fontSize: '12px', marginTop: '15px' }}>
+          Do not close this window
+        </p>
+      </div>
+    </div>
+  );
+};
+// NEW FUNCTION: Handle final action selection
 // NEW FUNCTION: Handle final action selection
 const handleFinalAction = (action) => {
   setIsConfirmModalOpen(false);
   
-  if (action === 'final') {const saveBillToDraftSheet = async (billData) => {
-  try {
-    setSavingToSheet(true);
-    setProcessingStage('sheet');
-    addDebugMessage("Saving NEW draft to Google Sheets...");
-    
-    // Ensure we're creating a new draft
-    const draftData = {
-      ...billData,
-      preparedBy: preparedBy,
-      preparedByRole: userRole,
-      preparedByEmail: userEmail,
-      preparedAt: new Date().toISOString(),
-      status: 'DRAFT',
-      documentType: 'NEW_DRAFT',
-      isNewDraft: true
-    };
-    
-    // Use 'new_draft' type to ensure Apps Script creates a new entry with sequential number
-    const encodedData = encodeURIComponent(JSON.stringify(draftData));
-    const urlEncodedData = `data=${encodedData}&type=new_draft`;
-    
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: urlEncodedData
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      addDebugMessage(`✅ New draft created: ${result.billNumber}`, 'success');
-      showToast(`New draft created with ID: ${result.billNumber}`, "success");
-      return true;
-    } else {
-      throw new Error(result.error);
-    }
-    
-  } catch (error) {
-    console.error("Error saving draft:", error);
-    addDebugMessage(`❌ Failed to save draft: ${error.message}`, 'error');
-    showToast("Failed to save draft", "error");
-    return false;
-  } finally {
-    setSavingToSheet(false);
-    if (processingStage === 'sheet') setProcessingStage(null);
-  }
-};
-    setTempBillData({ ...billForm });
-    setIsPackingMaterialsModalOpen(true);
+  if (action === 'final') {
+    // Direct final submission without packing materials
+    handleFinalSubmission();
   } else if (action === 'draft') {
     setTempBillDataForDraft({ ...billForm });
     handleSaveAsDraft();
@@ -561,91 +565,527 @@ const handleFinalAction = (action) => {
 };
 
 const handleSaveAsDraft = async () => {
-  if (!tempBillDataForDraft) return;
+  if (!tempBillDataForDraft) {
+    showToast("No draft data to save", "error");
+    return;
+  }
   
-  // Get the next sequential draft number
-  const draftNumber = await getNextDraftNumber();
+  // Show loading immediately
+  setSavingToSheet(true);
+  setProcessingStage('sheet');
   
-  addDebugMessage(`Creating new draft with sequential number: ${draftNumber}`, 'info');
+  addDebugMessage(`Starting draft save process...`, 'info');
   
-  const draftData = {
-    billNumber: draftNumber,
-    packingNumber: draftNumber,
-    partyName: selectedPartyState?.name || tempBillDataForDraft.partyName,
-    billDate: tempBillDataForDraft.billDate,
-    dueDate: tempBillDataForDraft.dueDate,
-    orderReference: tempBillDataForDraft.orderReference || "",
-    items: tempBillDataForDraft.items.map(item => ({
-      id: item.id,
-      barcode: item.barcode,
-      lotNumber: item.lotNumber,
-      brand: item.brand,
-      description: item.description,
-      sets: item.sets,
-      setsPerPcs: item.setsPerPcs,
-      loosePcs: item.loosePcs,
-      looseOperation: item.looseOperation || "add",
-      quantity: item.quantity,
-      colors: item.colors,
-      sizes: item.sizes
-    })),
-    notes: tempBillDataForDraft.notes,
-    createdDate: new Date().toISOString(),
-    preparedBy: preparedBy,
-    preparedByRole: userRole,
-    preparedByEmail: userEmail,
-    status: 'DRAFT',
-    documentType: 'NEW_DRAFT'
-  };
+  try {
+    // Get the next sequential draft number
+    addDebugMessage(`Getting next draft number...`, 'info');
+    const draftNumber = await getNextDraftNumber();
+    
+    addDebugMessage(`Creating draft with number: ${draftNumber}`, 'info');
+    
+    const draftData = {
+      billNumber: draftNumber,
+      packingNumber: draftNumber,
+      partyName: selectedPartyState?.name || tempBillDataForDraft.partyName,
+      billDate: tempBillDataForDraft.billDate,
+      dueDate: tempBillDataForDraft.dueDate || "",
+      orderReference: tempBillDataForDraft.orderReference || "",
+      items: tempBillDataForDraft.items.map(item => ({
+        id: item.id,
+        barcode: item.barcode,
+        lotNumber: item.lotNumber,
+        brand: item.brand,
+        description: item.description,
+        sets: item.sets,
+        setsPerPcs: item.setsPerPcs,
+        loosePcs: item.loosePcs,
+        looseOperation: item.looseOperation || "add",
+        quantity: item.quantity,
+        colors: item.colors || [],
+        sizes: item.sizes || []
+      })),
+      notes: tempBillDataForDraft.notes || "",
+      createdDate: new Date().toISOString(),
+      preparedBy: preparedBy,
+      preparedByRole: userRole,
+      preparedByEmail: userEmail,
+      status: 'DRAFT',
+      documentType: 'DRAFT'
+    };
+    
+    // FIRST: Generate DRAFT PDF
+    addDebugMessage(`Generating DRAFT PDF...`, 'info');
+    const pdfGenerated = await generateDraftPDF(draftData);
+    
+    if (!pdfGenerated) {
+      throw new Error('Failed to generate DRAFT PDF');
+    }
+    
+    // SECOND: Save to Google Sheets
+    addDebugMessage(`Saving draft data to sheet...`, 'info');
+    const saved = await saveBillToDraftSheet(draftData);
+    
+    if (saved) {
+      addDebugMessage(`✅ Draft saved successfully: ${draftNumber}`, 'success');
+      
+      setShowSuccessAnimation(true);
+      setTimeout(() => setShowSuccessAnimation(false), 2000);
+      
+      if (onSubmit) onSubmit(draftData);
+      
+      // Reset form after saving draft
+      setBillForm({
+        partyName: selectedParty?.name || "",
+        billDate: new Date().toISOString().split('T')[0],
+        dueDate: "",
+        items: [],
+        notes: ""
+      });
+      
+      if (!selectedParty) setSelectedPartyState(null);
+      
+      setCurrentProduct({
+        barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
+        looseOperation: "add",
+        brand: "", item: "", quantity: 1, totalPieces: "",
+        colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
+      });
+      
+      setTempBillDataForDraft(null);
+      setIsEditingExistingDraft(false);
+      setExistingDraftNumber(null);
+      
+      showToast(`Draft ${draftNumber} saved and PDF generated!`, 'success');
+      
+      if (barcodeInputRef.current) barcodeInputRef.current.focus();
+      await fetchLotSummary();
+      
+      // Close the confirmation modal
+      setIsConfirmModalOpen(false);
+    } else {
+      throw new Error('Save operation returned false');
+    }
+    
+  } catch (error) {
+    console.error("Error in handleSaveAsDraft:", error);
+    addDebugMessage(`❌ Draft save failed: ${error.message}`, 'error');
+    showToast(`Failed to save draft: ${error.message}`, "error");
+  } finally {
+    // Clear loading states
+    setTimeout(() => {
+      setSavingToSheet(false);
+      setProcessingStage(null);
+    }, 1000);
+  }
+};
+const generateDraftPDF = async (draftData) => {
+  if (!draftData || !draftData.items || draftData.items.length === 0) {
+    console.error("Invalid draft data");
+    return false;
+  }
+
+  setGeneratingPDF(true);
+  setProcessingStage('pdf');
   
-  const saved = await saveBillToDraftSheet(draftData);
-  
-  if (saved) {
-    setShowSuccessAnimation(true);
-    setTimeout(() => setShowSuccessAnimation(false), 2000);
+  try {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const leftMargin = 15;
+    const rightMargin = 15;
+    const contentWidth = pageWidth - leftMargin - rightMargin;
+
+    const uniqueLots = new Set(draftData.items.map(item => item.lotNumber)).size;
+    const totalItems = draftData.items.length;
+    const totalQuantity = draftData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const totalSets = draftData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
+
+    const MAX_ROWS_PER_PAGE = 12;
+
+    const drawPageBorder = () => {
+      doc.setLineWidth(0.5);
+      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+      doc.setLineWidth(0.3);
+    };
+
+    const drawHeader = (yPos) => {
+      // DRAFT WATERMARK BACKGROUND
+      doc.setFont("times", "bold");
+      doc.setFontSize(60);
+      doc.setTextColor(200, 200, 200);
+      doc.text("DRAFT", pageWidth / 2, pageHeight / 2, { align: "center", angle: 45 });
+      doc.setTextColor(0, 0, 0);
+      
+      // Main title
+      doc.setFont("times", "bold");
+      doc.setFontSize(26);
+      doc.text("Packing List (DRAFT)", pageWidth / 2, yPos, { align: "center" });
+      yPos += 10;
+      
+      // DRAFT warning
+      doc.setFontSize(12);
+      doc.setTextColor(255, 0, 0);
+      doc.text("*** DRAFT DOCUMENT - NOT FOR DISPATCH ***", pageWidth / 2, yPos, { align: "center" });
+      doc.setTextColor(0, 0, 0);
+      yPos += 8;
+
+      // Add Bill To information
+      const partyName = draftData.partyName || 'N/A';
+      const maxWidth = contentWidth;
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      
+      if (doc.getTextWidth(partyName) > maxWidth) {
+        let remainingName = partyName;
+        let lines = [];
+        
+        while (remainingName.length > 0) {
+          let line = "";
+          for (let i = 0; i < remainingName.length; i++) {
+            const testLine = line + remainingName[i];
+            if (doc.getTextWidth(testLine) <= maxWidth) {
+              line = testLine;
+            } else {
+              break;
+            }
+          }
+          lines.push(line);
+          remainingName = remainingName.substring(line.length);
+        }
+        
+        for (let i = 0; i < lines.length; i++) {
+          doc.text(lines[i], pageWidth / 2, yPos, { align: "center" });
+          yPos += 7;
+        }
+        yPos += 3;
+      } else {
+        doc.text(partyName, pageWidth / 2, yPos, { align: "center" });
+        yPos += 6;
+      }
+      
+      // Draw the main box
+      const boxHeight = 45;
+      doc.rect(leftMargin, yPos, contentWidth, boxHeight);
+      
+      const midPoint = leftMargin + (contentWidth / 2);
+      doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
+
+      // LEFT SIDE CONTENT
+      const leftLabelX = leftMargin + 5;
+      const leftValueX = leftMargin + 42;
+      const leftMaxWidth = midPoint - leftValueX - 3;
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      
+      doc.text("Date", leftLabelX, yPos + 7);
+      doc.text(":", leftLabelX + 20, yPos + 7);
+      doc.setFont("times", "normal");
+      doc.text(`${draftData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 7);
+      
+      doc.setFont("times", "bold");
+      doc.text("Order Ref", leftLabelX, yPos + 14);
+      doc.text(":", leftLabelX + 20, yPos + 14);
+      doc.setFont("times", "normal");
+      let orderRef = `${draftData.orderReference || 'N/A'}`;
+      if (doc.getTextWidth(orderRef) > leftMaxWidth) {
+        orderRef = orderRef.substring(0, 20) + "...";
+      }
+      doc.text(orderRef, leftValueX, yPos + 14);
+      
+      doc.setFont("times", "bold");
+      doc.text("Doc No", leftLabelX, yPos + 21);
+      doc.text(":", leftLabelX + 20, yPos + 21);
+      doc.setFont("times", "normal");
+      doc.text(`${draftData.packingNumber || 'N/A'}`, leftValueX, yPos + 21);
+      
+      doc.setFont("times", "bold");
+      doc.text("Generated By", leftLabelX, yPos + 28);
+      doc.text(":", leftLabelX + 20, yPos + 28);
+      doc.setFont("times", "normal");
+      const preparedByText = `${draftData.preparedBy || preparedBy}`;
+      const preparedByRole = `${draftData.preparedByRole || userRole}`;
+      const fullPreparedText = `${preparedByText} (${preparedByRole})`;
+      
+      if (doc.getTextWidth(fullPreparedText) > leftMaxWidth) {
+        doc.text(preparedByText, leftValueX, yPos + 28);
+        doc.text(`(${preparedByRole})`, leftValueX, yPos + 35);
+      } else {
+        doc.text(fullPreparedText, leftValueX, yPos + 28);
+      }
+      
+      doc.setFont("times", "bold");
+      doc.text("Document Status", leftLabelX, yPos + 35);
+      doc.text(":", leftLabelX + 20, yPos + 35);
+      doc.setFont("times", "bold");
+      doc.setTextColor(255, 0, 0);
+      doc.text("DRAFT", leftValueX, yPos + 35);
+      doc.setTextColor(0, 0, 0);
+
+      // RIGHT SIDE CONTENT
+      const rightLabelX = midPoint + 5;
+      const rightValueX = midPoint + 40;
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      
+      doc.text("Total Lots", rightLabelX, yPos + 7);
+      doc.text(":", rightLabelX + 20, yPos + 7);
+      doc.setFont("times", "normal");
+      doc.text(uniqueLots.toString(), rightValueX, yPos + 7);
+      
+      doc.setFont("times", "bold");
+      doc.text("Total Items", rightLabelX, yPos + 14);
+      doc.text(":", rightLabelX + 20, yPos + 14);
+      doc.setFont("times", "normal");
+      doc.text(totalItems.toString(), rightValueX, yPos + 14);
+      
+      doc.setFont("times", "bold");
+      doc.text("Total Qty", rightLabelX, yPos + 21);
+      doc.text(":", rightLabelX + 20, yPos + 21);
+      doc.setFont("times", "normal");
+      doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 21);
+      
+      doc.setFont("times", "bold");
+      doc.text("Total Sets", rightLabelX, yPos + 28);
+      doc.text(":", rightLabelX + 20, yPos + 28);
+      doc.setFont("times", "normal");
+      doc.text(totalSets.toString(), rightValueX, yPos + 28);
+      
+      doc.setFont("times", "bold");
+      doc.text("Document Type", rightLabelX, yPos + 35);
+      doc.text(":", rightLabelX + 20, yPos + 35);
+      doc.setFont("times", "bold");
+      doc.setTextColor(255, 0, 0);
+      doc.text("DRAFT COPY", rightValueX, yPos + 35);
+      doc.setTextColor(0, 0, 0);
+
+      return yPos + boxHeight + 8;
+    };
+
+    const drawTableHeader = (yPos) => {
+      const tableColumns = [
+        { header: "S.No", width: 10 },
+        { header: "Lot Number", width: 20 },
+        { header: "Brand", width: 25 },
+        { header: "Description", width: 50 },
+        { header: "Sets", width: 17 },
+        { header: "Pc/Set", width: 17 },
+        { header: "Loose Pc", width: 17 },
+        { header: "Total Qty", width: 23 }
+      ];
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(11);
+      doc.setFillColor(240, 240, 240);
+      doc.rect(leftMargin, yPos, contentWidth, 12, 'F');
+      doc.rect(leftMargin, yPos, contentWidth, 12);
+      
+      let currentX = leftMargin;
+      tableColumns.forEach(col => {
+        const textWidth = doc.getTextWidth(col.header);
+        const textX = currentX + (col.width / 2) - (textWidth / 2);
+        doc.text(col.header, textX, yPos + 8);
+        currentX += col.width;
+        if (currentX < pageWidth - rightMargin) {
+          doc.line(currentX, yPos, currentX, yPos + 12);
+        }
+      });
+      
+      return yPos + 12;
+    };
+
+    const drawTableRow = (item, index, yPos) => {
+      const tableColumns = [
+        { width: 10 }, { width: 20 }, { width: 25 }, { width: 50 },
+        { width: 17 }, { width: 17 }, { width: 17 }, { width: 23 }
+      ];
+      
+      const rowHeight = 12;
+      doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+      
+      let colX = leftMargin;
+      tableColumns.forEach(col => {
+        colX += col.width;
+        if (colX < pageWidth - rightMargin) {
+          doc.line(colX, yPos, colX, yPos + rowHeight);
+        }
+      });
+
+      const values = [
+        (index + 1).toString(),
+        item.lotNumber || "",
+        item.brand || "",
+        (() => {
+          let description = item.description || "";
+          const maxChars = 33;
+          if (description.length > maxChars) {
+            description = description.substring(0, maxChars - 3) + "...";
+          }
+          return description;
+        })(),
+        (item.sets || 0).toString(),
+        (item.setsPerPcs || 0).toString(),
+        (item.loosePcs || 0).toString(),
+        (item.quantity || 0).toString()
+      ];
+
+      doc.setFont("times", "normal");
+      doc.setFontSize(10);
+      
+      let textX = leftMargin;
+      values.forEach((value, colIndex) => {
+        const textWidth = doc.getTextWidth(value);
+        const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
+        doc.text(value, textXPos, yPos + 8);
+        textX += tableColumns[colIndex].width;
+      });
+
+      return rowHeight;
+    };
+
+    const drawTableFooter = (yPos, isLastPage) => {
+      yPos += 5;
+      doc.setLineWidth(0.5);
+      doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
+      
+      if (isLastPage) {
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text("*** DRAFT DOCUMENT - NOT VALID FOR DISPATCH ***", pageWidth / 2, yPos + 7, { align: "center" });
+        doc.setTextColor(0, 0, 0);
+      }
+      
+      return yPos + 18;
+    };
+
+    const drawSignatures = (yPos) => {
+      const footerY = pageHeight - 25;
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      
+      doc.setLineWidth(0.3);
+      
+      const sectionWidth = (contentWidth - 20) / 4;
+      let currentX = leftMargin;
+      
+      doc.text("Prepared By", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text(`${draftData.preparedBy || preparedBy} (${draftData.preparedByRole || userRole})`, currentX + 5, footerY + 9);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(10);
+      doc.text("Account Officer", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(10);
+      doc.text("Checked By", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
+      
+      currentX += sectionWidth;
+      doc.setFontSize(10);
+      doc.text("Authorized Signatory", currentX + 5, footerY);
+      doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
+      
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text("DRAFT COPY - For review only", pageWidth / 2, footerY - 18, { align: "center" });
+      doc.setTextColor(0, 0, 0);
+    };
+
+    // Generate pages
+    let itemsProcessed = 0;
+    let pageCount = 0;
     
-    if (onSubmit) onSubmit(draftData);
+    while (itemsProcessed < draftData.items.length) {
+      const remainingRows = draftData.items.length - itemsProcessed;
+      const rowsOnThisPage = Math.min(MAX_ROWS_PER_PAGE, remainingRows);
+      const isLastPage = (itemsProcessed + rowsOnThisPage) === draftData.items.length;
+      
+      let yPos = 15;
+      
+      if (pageCount > 0) {
+        doc.addPage();
+      }
+      
+      drawPageBorder();
+      yPos = drawHeader(yPos);
+      yPos = drawTableHeader(yPos);
+      
+      for (let i = 0; i < rowsOnThisPage; i++) {
+        const item = draftData.items[itemsProcessed];
+        const rowHeight = drawTableRow(item, itemsProcessed, yPos);
+        yPos += rowHeight;
+        itemsProcessed++;
+      }
+      
+      yPos = drawTableFooter(yPos, isLastPage);
+      
+      if (isLastPage) {
+        drawSignatures(yPos);
+      } else {
+        yPos += 5;
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
+        doc.setTextColor(0, 0, 0);
+      }
+      
+      pageCount++;
+    }
+
+    // Add page numbers
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        `Page ${i} of ${totalPages} - DRAFT`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+      doc.setTextColor(0, 0, 0);
+    }
+
+    const fileName = `DRAFT_${draftData.packingNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
     
-    // Reset form after saving draft
-    setBillForm({
-      partyName: selectedParty?.name || "",
-      billDate: new Date().toISOString().split('T')[0],
-      dueDate: "",
-      items: [],
-      notes: ""
-    });
-    
-    if (!selectedParty) setSelectedPartyState(null);
-    
-    setCurrentProduct({
-      barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
-      looseOperation: "add",
-      brand: "", item: "", quantity: 1, totalPieces: "",
-      colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
-    });
-    
-    setTempBillDataForDraft(null);
-    
-    // Clear editing flags if any
-    setIsEditingExistingDraft(false);
-    setExistingDraftNumber(null);
-    
-    showToast(`New draft ${draftNumber} created successfully!`, 'success');
-    
-    if (barcodeInputRef.current) barcodeInputRef.current.focus();
-    await fetchLotSummary();
+    setProcessingStage(null);
+    return true;
+
+  } catch (error) {
+    console.error("Draft PDF Generation Error:", error);
+    setProcessingStage('error');
+    return false;
+  } finally {
+    setTimeout(() => {
+      setGeneratingPDF(false);
+      setProcessingStage(null);
+    }, 500);
   }
 };
 
 // NEW FUNCTION: Handle final submission with packing materials
 // NEW FUNCTION: Handle final submission with packing materials
-const handleFinalSubmissionWithMaterials = async (materials) => {
+// NEW FUNCTION: Handle final submission without packing materials
+const handleFinalSubmission = async () => {
   if (!tempBillData) return;
   
   // Use 'PL' prefix for Final Bills (Packing List)
   const packingNumber = await getNextPackingNumber('PL');
   
-  // Use the materials passed from the modal, not the state
   const packingDataForStorage = {
     billNumber: packingNumber,
     packingNumber: packingNumber,
@@ -668,23 +1108,13 @@ const handleFinalSubmissionWithMaterials = async (materials) => {
       sizes: item.sizes
     })),
     notes: tempBillData.notes,
-    packingMaterials: {
-      totalBoxes: materials.totalBoxes,
-      totalBags: materials.totalBags,
-      totalPolybags: materials.totalPolybags
-    },
     createdDate: new Date().toISOString(),
     preparedBy: preparedBy,
     preparedByRole: userRole,
     preparedByEmail: userEmail,
-    status: 'FINAL'
+    status: 'FINAL',
+    documentType: 'FINAL'
   };
-  
-  // Debug: Log what's being sent
-  addDebugMessage(`Saving with packing materials: Boxes=${materials.totalBoxes}, Bags=${materials.totalBags}, Polybags=${materials.totalPolybags}`, 'info');
-  
-  // Show what's being saved
-  console.log("Packing Data to Save:", packingDataForStorage);
   
   const pdfGenerated = await generatePackingList(packingDataForStorage);
   
@@ -697,6 +1127,7 @@ const handleFinalSubmissionWithMaterials = async (materials) => {
     
     if (onSubmit) onSubmit(packingDataForStorage);
     
+    // Reset form after final submission
     setBillForm({
       partyName: selectedParty?.name || "",
       billDate: new Date().toISOString().split('T')[0],
@@ -704,19 +1135,22 @@ const handleFinalSubmissionWithMaterials = async (materials) => {
       items: [],
       notes: ""
     });
-    setPackingMaterials({ totalBoxes: 0, totalBags: 0, totalPolybags: 0 });
+    
     if (!selectedParty) setSelectedPartyState(null);
+    
     setCurrentProduct({
       barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
       looseOperation: "add",
       brand: "", item: "", quantity: 1, totalPieces: "",
       colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
     });
+    
     setTempBillData(null);
+    setTempBillDataForDraft(null);
     
-    showToast(`Packing list ${packingNumber} generated with ${materials.totalBoxes} Boxes, ${materials.totalBags} Bags, ${materials.totalPolybags} Polybags!`, 'success');
+    showToast(`Packing list ${packingNumber} generated successfully!`, 'success');
+    
     if (barcodeInputRef.current) barcodeInputRef.current.focus();
-    
     await fetchLotSummary();
   }
 };
@@ -836,7 +1270,7 @@ const fetchLotSummaryWithData = async (allProductData) => {
   try {
     const billsData = await fetchBillsFromSheet();
     
-    // Map to track dispatched quantities
+    // Map to track dispatched quantities by PARENT lot
     const dispatchedMap = new Map();
     
     if (billsData && billsData.length > 0) {
@@ -851,8 +1285,11 @@ const fetchLotSummaryWithData = async (allProductData) => {
               billData.items.forEach(item => {
                 const lotNumber = item.lotNumber;
                 if (lotNumber) {
+                  // Get parent lot for grouping
+                  const parentLot = getParentLotNumber(lotNumber);
                   const dispatchedQty = item.quantity || 0;
-                  dispatchedMap.set(lotNumber, (dispatchedMap.get(lotNumber) || 0) + dispatchedQty);
+                  dispatchedMap.set(parentLot, (dispatchedMap.get(parentLot) || 0) + dispatchedQty);
+                  addDebugMessage(`Dispatched: ${parentLot} (+${dispatchedQty}) from lot ${lotNumber}`, 'info');
                 }
               });
             }
@@ -863,31 +1300,77 @@ const fetchLotSummaryWithData = async (allProductData) => {
       });
     }
     
-    addDebugMessage(`Dispatched totals: ${JSON.stringify(Object.fromEntries(dispatchedMap))}`, 'info');
+    addDebugMessage(`Dispatched totals by parent lot: ${JSON.stringify(Object.fromEntries(dispatchedMap))}`, 'info');
     
     const summary = [];
     const processedLots = new Set();
     
-    // FIRST: Process ALL lots from product database (sheetData and oldLotData)
-    addDebugMessage(`Processing ${allProductData.length} total products from database...`, 'info');
+    // FIRST: Group all products by parent lot number
+    const groupedProducts = new Map();
     
     allProductData.forEach(product => {
       const lotNumber = product['Lot Number'];
-      if (!lotNumber || processedLots.has(lotNumber)) return;
+      if (!lotNumber) return;
       
-      processedLots.add(lotNumber);
+      const parentLot = getParentLotNumber(lotNumber);
       
-      // Calculate total pieces from product data
-      let totalPieces = product['Total Pieces'];
-      if (!totalPieces || totalPieces === 0) {
-        const piecesPerSet = parseInt(product['Pieces Per Set']) || 0;
-        const numberOfSets = parseInt(product['Number of Sets']) || parseInt(product['Total Sets']) || 0;
-        totalPieces = piecesPerSet * numberOfSets;
+      if (!groupedProducts.has(parentLot)) {
+        groupedProducts.set(parentLot, []);
       }
-      totalPieces = Number(totalPieces) || 0;
+      groupedProducts.get(parentLot).push(product);
+    });
+    
+    addDebugMessage(`Grouped into ${groupedProducts.size} parent lots`, 'info');
+    
+    // Process each parent lot
+    for (const [parentLot, products] of groupedProducts) {
+      if (processedLots.has(parentLot)) continue;
+      processedLots.add(parentLot);
       
-      const isOldLot = product['Source'] === 'OLD LOT';
-      const dispatchedQty = dispatchedMap.get(lotNumber) || 0;
+      // Calculate total pieces from ALL sub-lots
+      let totalPieces = 0;
+      let itemName = '';
+      let brand = '';
+      let isOldLot = false;
+      let allColors = [];
+      let allSizes = [];
+      
+      products.forEach(product => {
+        // Calculate pieces for this sub-lot
+        let pieces = product['Total Pieces'];
+        if (!pieces || pieces === 0) {
+          const piecesPerSet = parseInt(product['Pieces Per Set']) || 0;
+          const numberOfSets = parseInt(product['Number of Sets']) || parseInt(product['Total Sets']) || 0;
+          pieces = piecesPerSet * numberOfSets;
+        }
+        totalPieces += Number(pieces) || 0;
+        
+        // Use first product's details for display
+        if (!itemName) {
+          itemName = product['Garment Type'] || product['Item Name'] || '';
+          brand = product['Party Name'] || product['Brand'] || '';
+          isOldLot = product['Source'] === 'OLD LOT';
+        }
+        
+        // Collect all colors and sizes
+        if (product['Colors']) {
+          let colors = product['Colors'];
+          if (typeof colors === 'string') {
+            try { colors = JSON.parse(colors); } catch(e) { colors = []; }
+          }
+          allColors = [...new Set([...allColors, ...colors])];
+        }
+        
+        if (product['Sizes']) {
+          let sizes = product['Sizes'];
+          if (typeof sizes === 'string') {
+            try { sizes = JSON.parse(sizes); } catch(e) { sizes = []; }
+          }
+          allSizes = [...new Set([...allSizes, ...sizes])];
+        }
+      });
+      
+      const dispatchedQty = dispatchedMap.get(parentLot) || 0;
       const availablePieces = isOldLot ? Infinity : Math.max(0, totalPieces - dispatchedQty);
       
       let status = 'PENDING';
@@ -899,25 +1382,29 @@ const fetchLotSummaryWithData = async (allProductData) => {
       }
       
       summary.push({
-        lotNumber: lotNumber,
+        lotNumber: parentLot,
+        subLots: products.map(p => p['Lot Number']), // Store sub-lot numbers
         totalPieces: totalPieces,
         dispatchedQty: dispatchedQty,
         pendingPieces: isOldLot ? 0 : Math.max(0, totalPieces - dispatchedQty),
         availablePieces: availablePieces,
         status: status,
         isOldLot: isOldLot,
-        itemName: product['Garment Type'] || product['Item Name'] || '',
-        brand: product['Party Name'] || product['Brand'] || ''
+        itemName: itemName,
+        brand: brand,
+        colors: allColors,
+        sizes: allSizes
       });
       
-      addDebugMessage(`Lot ${lotNumber}: Total=${totalPieces}, Dispatched=${dispatchedQty}, Available=${availablePieces === Infinity ? '∞' : availablePieces}, Status=${status}`, 'info');
-    });
+      addDebugMessage(`Parent Lot ${parentLot}: Total=${totalPieces} (from ${products.length} sub-lots), Dispatched=${dispatchedQty}, Available=${availablePieces === Infinity ? '∞' : availablePieces}, Status=${status}`, 'success');
+    }
     
     // SECOND: Add any lots that appear only in dispatches (not in product database)
-    for (const [lotNumber, dispatchedQty] of dispatchedMap) {
-      if (!processedLots.has(lotNumber)) {
+    for (const [parentLot, dispatchedQty] of dispatchedMap) {
+      if (!processedLots.has(parentLot)) {
         summary.push({
-          lotNumber: lotNumber,
+          lotNumber: parentLot,
+          subLots: [],
           totalPieces: 0,
           dispatchedQty: dispatchedQty,
           pendingPieces: 0,
@@ -927,7 +1414,7 @@ const fetchLotSummaryWithData = async (allProductData) => {
           itemName: 'Unknown',
           brand: 'Unknown'
         });
-        addDebugMessage(`Dispatch-only lot ${lotNumber}: Dispatched=${dispatchedQty}`, 'info');
+        addDebugMessage(`Dispatch-only parent lot ${parentLot}: Dispatched=${dispatchedQty}`, 'info');
       }
     }
     
@@ -936,7 +1423,7 @@ const fetchLotSummaryWithData = async (allProductData) => {
     summary.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
     
     setLotSummary(summary);
-    addDebugMessage(`✅ Loaded summary for ${summary.length} lots (${summary.filter(l => l.isOldLot).length} old lots, ${summary.filter(l => l.totalPieces === 0 && !l.isOldLot).length} new/dispatch-only lots)`, 'success');
+    addDebugMessage(`✅ Loaded summary for ${summary.length} parent lots`, 'success');
     
   } catch (error) {
     console.error("Error fetching lot summary:", error);
@@ -950,32 +1437,33 @@ const fetchLotSummaryWithData = async (allProductData) => {
     await fetchLotSummaryWithData(allData);
   };
   
-  const checkLotAvailability = (lotNumber, requestedQty) => {
-    const lot = lotSummary.find(l => l.lotNumber === lotNumber);
-    if (!lot) {
-      return { available: true, message: "New lot - no previous dispatches" };
-    }
-    
-    if (lot.isOldLot) {
-      return { available: true, message: "Old stock - no restrictions" };
-    }
-    
-    if (requestedQty > lot.availablePieces) {
-      return { 
-        available: false, 
-        message: `Only ${lot.availablePieces} pieces available. Requested: ${requestedQty}`,
-        availablePieces: lot.availablePieces
-      };
-    }
-    
-    return { available: true, message: "Available for dispatch" };
-  };
+const checkLotAvailability = (lotNumber, requestedQty) => {
+  const parentLot = getParentLotNumber(lotNumber);
+  const lot = lotSummary.find(l => l.lotNumber === parentLot);
+  if (!lot) {
+    return { available: true, message: "New lot - no previous dispatches" };
+  }
   
-  const getLotInfo = (lotNumber) => {
-    if (!lotNumber) return null;
-    return lotSummary.find(l => l.lotNumber === lotNumber);
-  };
-
+  if (lot.isOldLot) {
+    return { available: true, message: "Old stock - no restrictions" };
+  }
+  
+  if (requestedQty > lot.availablePieces) {
+    return { 
+      available: false, 
+      message: `Only ${lot.availablePieces} pieces available for parent lot ${parentLot}. Requested: ${requestedQty}`,
+      availablePieces: lot.availablePieces
+    };
+  }
+  
+  return { available: true, message: "Available for dispatch" };
+};
+  
+const getLotInfo = (lotNumber) => {
+  if (!lotNumber) return null;
+  const parentLot = getParentLotNumber(lotNumber);
+  return lotSummary.find(l => l.lotNumber === parentLot);
+};
   // ==================== BARCODE SCANNER FUNCTIONS ====================
 
   const normalizeBarcode = (barcode) => {
@@ -1150,11 +1638,44 @@ const fetchLotSummaryWithData = async (allProductData) => {
       const words = remainingDescription.split(/\s+/);
       
       // Known brand indicators
-      const brandIndicators = [
-        'ADIDAS', 'NIKE', 'PUMA', 'REEBOK', 'UNDERARMOUR', 'GUCCI', 'LOUISVUITTON',
-        'BALENCIAGA', 'ESSENTIALS', 'AMIRI', 'OFFWHITE', 'DIESEL', 'H&M', 'ZARA',
-        'GIRLISH', 'R.L.POLO', 'LACOSTE', 'BROOKSBROTHERS', 'POLO', 'TOMMY', 'CALVINKLEIN','GYMSHARK','HERMES','DIOR','ESSENTIAL','JORDAN','HOLISTER',
-      ];
+    const brandIndicators = [
+  // Sportswear & Athletic
+  'ADIDAS','NIKE','PUMA','REEBOK','UNDER ARMOUR','GYMSHARK','ASICS','NEW BALANCE',
+  'FILA','COLUMBIA','THE NORTH FACE','PATAGONIA','SALOMON','DECATHLON','KAPPA',
+  'UMBRO','JORDAN','SKECHERS','LACOSTE','LORO PIANA','GANT','HOODRICH','UNDER ARMOUR',
+
+  // Luxury Fashion
+  'GUCCI','LOUIS VUITTON','BALENCIAGA','DIOR','HERMES','PRADA','VERSACE','FENDI',
+  'BURBERRY','ARMANI','VALENTINO','GIVENCHY','YVES SAINT LAURENT','SAINT LAURENT',
+  'BOTTEGA VENETA','ALEXANDER MCQUEEN','OFF WHITE','AMIRI','DOLCE & GABBANA',
+
+  // Premium & Designer
+  'CALVIN KLEIN','TOMMY HILFIGER','RALPH LAUREN','POLO','R.L. POLO','LACOSTE',
+  'HUGO BOSS','MICHAEL KORS','COACH','KATE SPADE','BROOKS BROTHERS','DKNY',
+
+  // Fast Fashion
+  'ZARA','H&M','UNIQLO','FOREVER 21','BERSHKA','PULL & BEAR','STRADIVARIUS',
+  'MANGO','TOPSHOP','NEXT','GAP','OLD NAVY','PRIMARK',
+
+  // Denim Focused
+  'LEVIS','LEE','WRANGLER','DIESEL','G-STAR','PEPE JEANS','TRUE RELIGION',
+
+  // Streetwear
+  'SUPREME','BAPE','PALACE','STUSSY','FEAR OF GOD','ESSENTIALS','CARHARTT',
+  'OFF-WHITE','A BATHING APE','KITH','VLONE','ANTI SOCIAL SOCIAL CLUB',
+
+  // Casual / Lifestyle
+  'ABERCROMBIE','HOLLISTER','AEROPOSTALE','AMERICAN EAGLE','SUPERDRY',
+  'JACK & JONES','ONLY','VERO MODA',
+
+  // Indian Brands
+  'ALLEN SOLLY','PETER ENGLAND','LOUIS PHILIPPE','VAN HEUSEN','FABINDIA',
+  'BIBA','W FOR WOMAN','MANYAVAR','RAYMOND','BLACKBERRYS','MUFTI',
+  'SPYKAR','FASHION FACTORY',
+
+  // Misc / Others
+  'ESSENTIAL','GIRLISH','ESSENTIALS','HOLISTER'
+];
       
       let brandIndex = -1;
       for (let i = 0; i < words.length; i++) {
@@ -1200,7 +1721,7 @@ const fetchLotSummaryWithData = async (allProductData) => {
       itemName = `Lot ${lotNumber}`;
     }
     if (!brand) {
-      brand = 'OLD STOCK';
+      brand = '---';
     }
     if (piecesPerSet === 0) {
       piecesPerSet = 5; // Default to 5 as seen in your data
@@ -1406,119 +1927,119 @@ const debugOldLotData = () => {
     return product;
   };
   // Packing Materials Modal Component
-const PackingMaterialsModal = () => {
-  const [localMaterials, setLocalMaterials] = useState({
-    totalBoxes: packingMaterials.totalBoxes,
-    totalBags: packingMaterials.totalBags,
-    totalPolybags: packingMaterials.totalPolybags
-  });
+// const PackingMaterialsModal = () => {
+//   const [localMaterials, setLocalMaterials] = useState({
+//     totalBoxes: packingMaterials.totalBoxes,
+//     totalBags: packingMaterials.totalBags,
+//     totalPolybags: packingMaterials.totalPolybags
+//   });
 
-  const handleConfirm = () => {
-    // Update the parent state first
-    setPackingMaterials(localMaterials);
-    // Close modal
-    setIsPackingMaterialsModalOpen(false);
-    // Call final submission after a small delay to ensure state is updated
-    setTimeout(() => {
-      handleFinalSubmissionWithMaterials(localMaterials);
-    }, 100);
-  };
+//   const handleConfirm = () => {
+//     // Update the parent state first
+//     setPackingMaterials(localMaterials);
+//     // Close modal
+//     setIsPackingMaterialsModalOpen(false);
+//     // Call final submission after a small delay to ensure state is updated
+//     setTimeout(() => {
+//       handleFinalSubmissionWithMaterials(localMaterials);
+//     }, 100);
+//   };
 
-  return (
-    <div className="blue-modal-overlay" onClick={() => setIsPackingMaterialsModalOpen(false)}>
-      <div className="blue-modal blue-modal-medium" onClick={(e) => e.stopPropagation()}>
-        <div className="blue-modal-header">
-          <div className="blue-modal-header-left">
-            <span className="blue-modal-icon">📦</span>
-            <h3>Packing Materials</h3>
-            <span className="blue-modal-badge">Final Submission</span>
-          </div>
-          <button className="blue-modal-close" onClick={() => setIsPackingMaterialsModalOpen(false)}>✕</button>
-        </div>
+//   return (
+//     <div className="blue-modal-overlay" onClick={() => setIsPackingMaterialsModalOpen(false)}>
+//       <div className="blue-modal blue-modal-medium" onClick={(e) => e.stopPropagation()}>
+//         <div className="blue-modal-header">
+//           <div className="blue-modal-header-left">
+//             <span className="blue-modal-icon">📦</span>
+//             <h3>Packing Materials</h3>
+//             <span className="blue-modal-badge">Final Submission</span>
+//           </div>
+//           <button className="blue-modal-close" onClick={() => setIsPackingMaterialsModalOpen(false)}>✕</button>
+//         </div>
         
-        <div className="blue-modal-body">
-          <div className="blue-info-message" style={{ 
-            backgroundColor: '#e8f0fe', 
-            padding: '12px', 
-            borderRadius: '8px', 
-            marginBottom: '20px',
-            fontSize: '13px'
-          }}>
-            <span style={{ fontSize: '18px', marginRight: '8px' }}>ℹ️</span>
-            Please enter the packing materials details for this dispatch
-          </div>
+//         <div className="blue-modal-body">
+//           <div className="blue-info-message" style={{ 
+//             backgroundColor: '#e8f0fe', 
+//             padding: '12px', 
+//             borderRadius: '8px', 
+//             marginBottom: '20px',
+//             fontSize: '13px'
+//           }}>
+//             <span style={{ fontSize: '18px', marginRight: '8px' }}>ℹ️</span>
+//             Please enter the packing materials details for this dispatch
+//           </div>
 
-          <div className="blue-form-field">
-            <label>📦 Total Boxes</label>
-            <input 
-              type="number" 
-              value={localMaterials.totalBoxes} 
-              onChange={(e) => setLocalMaterials({ ...localMaterials, totalBoxes: parseInt(e.target.value) || 0 })} 
-              className="blue-input" 
-              placeholder="Enter number of boxes"
-              autoFocus
-              min="0"
-            />
-          </div>
+//           <div className="blue-form-field">
+//             <label>📦 Total Boxes</label>
+//             <input 
+//               type="number" 
+//               value={localMaterials.totalBoxes} 
+//               onChange={(e) => setLocalMaterials({ ...localMaterials, totalBoxes: parseInt(e.target.value) || 0 })} 
+//               className="blue-input" 
+//               placeholder="Enter number of boxes"
+//               autoFocus
+//               min="0"
+//             />
+//           </div>
           
-          <div className="blue-form-field">
-            <label>🛍️ Total Bags</label>
-            <input 
-              type="number" 
-              value={localMaterials.totalBags} 
-              onChange={(e) => setLocalMaterials({ ...localMaterials, totalBags: parseInt(e.target.value) || 0 })} 
-              className="blue-input" 
-              placeholder="Enter number of bags"
-              min="0"
-            />
-          </div>
+//           <div className="blue-form-field">
+//             <label>🛍️ Total Bags</label>
+//             <input 
+//               type="number" 
+//               value={localMaterials.totalBags} 
+//               onChange={(e) => setLocalMaterials({ ...localMaterials, totalBags: parseInt(e.target.value) || 0 })} 
+//               className="blue-input" 
+//               placeholder="Enter number of bags"
+//               min="0"
+//             />
+//           </div>
           
-          <div className="blue-form-field">
-            <label>📎 Total Polythene Bags</label>
-            <input 
-              type="number" 
-              value={localMaterials.totalPolybags} 
-              onChange={(e) => setLocalMaterials({ ...localMaterials, totalPolybags: parseInt(e.target.value) || 0 })} 
-              className="blue-input" 
-              placeholder="Enter number of polythene bags"
-              min="0"
-            />
-          </div>
+//           <div className="blue-form-field">
+//             <label>📎 Total Polythene Bags</label>
+//             <input 
+//               type="number" 
+//               value={localMaterials.totalPolybags} 
+//               onChange={(e) => setLocalMaterials({ ...localMaterials, totalPolybags: parseInt(e.target.value) || 0 })} 
+//               className="blue-input" 
+//               placeholder="Enter number of polythene bags"
+//               min="0"
+//             />
+//           </div>
 
-          <div className="blue-summary-box" style={{
-            marginTop: '20px',
-            padding: '15px',
-            backgroundColor: '#f8f9fa',
-            borderRadius: '8px',
-            border: '1px solid #dee2e6'
-          }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Summary</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-              <span>Total Items:</span>
-              <strong>{tempBillData?.items.length || 0}</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginTop: '5px' }}>
-              <span>Total Quantity:</span>
-              <strong>{tempBillData?.items.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0} PCS</strong>
-            </div>
-          </div>
-        </div>
+//           <div className="blue-summary-box" style={{
+//             marginTop: '20px',
+//             padding: '15px',
+//             backgroundColor: '#f8f9fa',
+//             borderRadius: '8px',
+//             border: '1px solid #dee2e6'
+//           }}>
+//             <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Summary</div>
+//             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+//               <span>Total Items:</span>
+//               <strong>{tempBillData?.items.length || 0}</strong>
+//             </div>
+//             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginTop: '5px' }}>
+//               <span>Total Quantity:</span>
+//               <strong>{tempBillData?.items.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0} PCS</strong>
+//             </div>
+//           </div>
+//         </div>
         
-        <div className="blue-modal-footer">
-          <button onClick={() => setIsPackingMaterialsModalOpen(false)} className="blue-btn blue-btn-secondary">
-            Cancel
-          </button>
-          <button 
-            onClick={handleConfirm} 
-            className="blue-btn blue-btn-primary blue-btn-large"
-          >
-            ✅ Confirm & Generate PDF
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+//         <div className="blue-modal-footer">
+//           <button onClick={() => setIsPackingMaterialsModalOpen(false)} className="blue-btn blue-btn-secondary">
+//             Cancel
+//           </button>
+//           <button 
+//             onClick={handleConfirm} 
+//             className="blue-btn blue-btn-primary blue-btn-large"
+//           >
+//             ✅ Confirm & Generate PDF
+//           </button>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
 
   const calculateTotalQuantity = (sets, setsPerPcs, loosePcs, looseOperation = "add") => {
     const setsNum = parseInt(sets) || 0;
@@ -1706,7 +2227,17 @@ const PackingMaterialsModal = () => {
     setLotSearchTerm(prev => prev + key);
   }
 };
-
+// Helper function to get parent lot number (e.g., "11472" from "11472A" or "11472B")
+const getParentLotNumber = (lotNumber) => {
+  if (!lotNumber) return null;
+  const lotStr = lotNumber.toString();
+  // Check if it ends with A, B, C, etc. (single letter suffix)
+  const match = lotStr.match(/^([A-Z0-9\-]+)([A-Z])$/i);
+  if (match && match[2] && match[2].length === 1 && /[A-Z]/i.test(match[2])) {
+    return match[1];
+  }
+  return lotStr;
+};
   const handleKeyboardSubmit = () => {
     handleManualLotSearch();
   };
@@ -1830,6 +2361,7 @@ const PackingMaterialsModal = () => {
     
     if (barcodeInputRef.current) barcodeInputRef.current.focus();
   };
+
 
   const updateCurrentProduct = (field, value) => {
     setCurrentProduct(prev => ({ ...prev, [field]: value }));
@@ -2029,10 +2561,10 @@ const generatePackingList = async (packingData) => {
   setProcessingStage('pdf');
   
   try {
+    // Only create Customer and Account pages - removed Audit
     const documentTypes = [
       { name: "Customer", subheading: "PACKING LIST FOR CUSTOMER" },
-      { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" },
-      { name: "Audit", subheading: "PACKING LIST FOR AUDIT" }
+      { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" }
     ];
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
@@ -2047,7 +2579,7 @@ const generatePackingList = async (packingData) => {
     const totalQuantity = packingData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
     const totalSets = packingData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
 
-    const MAX_ROWS_PER_PAGE = 14;
+    const MAX_ROWS_PER_PAGE = 12; // Reduced from 14 to accommodate larger fonts
 
     const drawPageBorder = () => {
       doc.setLineWidth(0.5);
@@ -2056,25 +2588,27 @@ const generatePackingList = async (packingData) => {
     };
 
     const drawHeader = (docType, yPos) => {
+      // Increased main title font size
       doc.setFont("times", "bold");
-      doc.setFontSize(22);
+      doc.setFontSize(26); // Increased from 22
       doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
-      yPos += 8;
+      yPos += 10; // Increased from 8
       
-      doc.setFontSize(14);
+      // Increased subheading font size
+      doc.setFontSize(16); // Increased from 14
       doc.setFont("times", "bold");
       doc.setTextColor(70, 70, 200);
       doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
       doc.setTextColor(0, 0, 0);
-      yPos += 12;
+      yPos += 8; // Reduced from 12 to minimize gap
 
-      // Add Bill To information centered (without prefix)
+      // Add Bill To information centered (without prefix) - Now BOLD and larger
       const partyName = packingData.partyName || 'N/A';
       const maxWidth = contentWidth;
       const billToTextWidth = doc.getTextWidth(partyName);
       
       doc.setFont("times", "bold");
-      doc.setFontSize(12);
+      doc.setFontSize(14); // Increased from 12
       doc.setTextColor(0, 0, 0);
       
       if (billToTextWidth > maxWidth) {
@@ -2097,74 +2631,74 @@ const generatePackingList = async (packingData) => {
         
         for (let i = 0; i < lines.length; i++) {
           doc.text(lines[i], pageWidth / 2, yPos, { align: "center" });
-          yPos += 6;
+          yPos += 7; // Slightly increased line spacing
         }
-        yPos += 2;
+        yPos += 3; // Reduced from 2
       } else {
         doc.text(partyName, pageWidth / 2, yPos, { align: "center" });
-        yPos += 8;
+        yPos += 6; // Reduced from 8 to minimize gap
       }
       
-      // Draw the main box - equally divided (50% each side)
-      const boxHeight = 38; // Reduced from 50 to 38 for tighter spacing
+      // Draw the main box - increased height for larger fonts
+      const boxHeight = 45; // Increased from 38 for larger fonts
       doc.rect(leftMargin, yPos, contentWidth, boxHeight);
       
       // Split exactly in the middle
       const midPoint = leftMargin + (contentWidth / 2);
       doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
 
-      // LEFT SIDE CONTENT - Tighter spacing (6mm between rows)
+      // LEFT SIDE CONTENT - Increased font sizes and spacing
       const leftLabelX = leftMargin + 5;
-      const leftValueX = leftMargin + 38;
+      const leftValueX = leftMargin + 42; // Increased from 38 for larger fonts
       const leftMaxWidth = midPoint - leftValueX - 3;
       
       doc.setFont("times", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(10); // Increased from 9
       
-      // Row 1 - Date (yPos + 6 instead of +8)
-      doc.text("Date", leftLabelX, yPos + 6);
-      doc.text(":", leftLabelX + 18, yPos + 6);
+      // Row 1 - Date (increased spacing)
+      doc.text("Date", leftLabelX, yPos + 7); // Increased from +6
+      doc.text(":", leftLabelX + 20, yPos + 7); // Increased from 18
       doc.setFont("times", "normal");
-      doc.text(`${packingData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 6);
+      doc.text(`${packingData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 7);
       
-      // Row 2 - Order Reference (yPos + 12 instead of +16)
+      // Row 2 - Order Reference
       doc.setFont("times", "bold");
-      doc.text("Order Ref", leftLabelX, yPos + 12);
-      doc.text(":", leftLabelX + 18, yPos + 12);
+      doc.text("Order Ref", leftLabelX, yPos + 14); // Increased from +12
+      doc.text(":", leftLabelX + 20, yPos + 14);
       doc.setFont("times", "normal");
       let orderRef = `${packingData.orderReference || 'N/A'}`;
       if (doc.getTextWidth(orderRef) > leftMaxWidth) {
         orderRef = orderRef.substring(0, 20) + "...";
       }
-      doc.text(orderRef, leftValueX, yPos + 12);
+      doc.text(orderRef, leftValueX, yPos + 14);
       
-      // Row 3 - Document No (yPos + 18 instead of +24)
+      // Row 3 - Document No
       doc.setFont("times", "bold");
-      doc.text("Doc No", leftLabelX, yPos + 18);
-      doc.text(":", leftLabelX + 18, yPos + 18);
+      doc.text("Doc No", leftLabelX, yPos + 21); // Increased from +18
+      doc.text(":", leftLabelX + 20, yPos + 21);
       doc.setFont("times", "normal");
-      doc.text(`${packingData.packingNumber || 'N/A'}`, leftValueX, yPos + 18);
+      doc.text(`${packingData.packingNumber || 'N/A'}`, leftValueX, yPos + 21);
       
-      // Row 4 - Generated by (yPos + 24 instead of +32)
+      // Row 4 - Generated by
       doc.setFont("times", "bold");
-      doc.text("Generated By", leftLabelX, yPos + 24);
-      doc.text(":", leftLabelX + 18, yPos + 24);
+      doc.text("Generated By", leftLabelX, yPos + 28); // Increased from +24
+      doc.text(":", leftLabelX + 20, yPos + 28);
       doc.setFont("times", "normal");
       const preparedByText = `${packingData.preparedBy || preparedBy}`;
       const preparedByRole = `${packingData.preparedByRole || userRole}`;
       const fullPreparedText = `${preparedByText} (${preparedByRole})`;
       
       if (doc.getTextWidth(fullPreparedText) > leftMaxWidth) {
-        doc.text(preparedByText, leftValueX, yPos + 24);
-        doc.text(`(${preparedByRole})`, leftValueX, yPos + 30);
+        doc.text(preparedByText, leftValueX, yPos + 28);
+        doc.text(`(${preparedByRole})`, leftValueX, yPos + 35);
       } else {
-        doc.text(fullPreparedText, leftValueX, yPos + 24);
+        doc.text(fullPreparedText, leftValueX, yPos + 28);
       }
       
-      // Row 5 - Packing Materials (yPos + 32 instead of +44)
+      // Row 5 - Packing Materials
       doc.setFont("times", "bold");
-      doc.text("Packing Materials", leftLabelX, yPos + 32);
-      doc.text(":", leftLabelX + 18, yPos + 32);
+      doc.text("Packing Materials", leftLabelX, yPos + 35); // Increased from +32
+      doc.text(":", leftLabelX + 20, yPos + 35);
       doc.setFont("times", "normal");
       
       const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
@@ -2184,7 +2718,7 @@ const generatePackingList = async (packingData) => {
       
       if (doc.getTextWidth(materialsText) > leftMaxWidth) {
         let remainingText = materialsText;
-        let currentY = yPos + 32;
+        let currentY = yPos + 35;
         while (remainingText.length > 0) {
           let line = "";
           for (let i = 0; i < remainingText.length; i++) {
@@ -2197,54 +2731,54 @@ const generatePackingList = async (packingData) => {
           }
           doc.text(line, leftValueX, currentY);
           remainingText = remainingText.substring(line.length);
-          currentY += 5;
+          currentY += 6;
         }
       } else {
-        doc.text(materialsText, leftValueX, yPos + 32);
+        doc.text(materialsText, leftValueX, yPos + 35);
       }
 
-      // RIGHT SIDE CONTENT - Tighter spacing (6mm between rows)
+      // RIGHT SIDE CONTENT - Increased font sizes
       const rightLabelX = midPoint + 5;
-      const rightValueX = midPoint + 35;
+      const rightValueX = midPoint + 40; // Increased from 35 for larger fonts
       
       doc.setFont("times", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(10); // Increased from 9
       
-      // Row 1 - Total Lots (yPos + 6)
-      doc.text("Total Lots", rightLabelX, yPos + 6);
-      doc.text(":", rightLabelX + 18, yPos + 6);
+      // Row 1 - Total Lots
+      doc.text("Total Lots", rightLabelX, yPos + 7);
+      doc.text(":", rightLabelX + 20, yPos + 7);
       doc.setFont("times", "normal");
-      doc.text(uniqueLots.toString(), rightValueX, yPos + 6);
+      doc.text(uniqueLots.toString(), rightValueX, yPos + 7);
       
-      // Row 2 - Total Items (yPos + 12)
+      // Row 2 - Total Items
       doc.setFont("times", "bold");
-      doc.text("Total Items", rightLabelX, yPos + 12);
-      doc.text(":", rightLabelX + 18, yPos + 12);
+      doc.text("Total Items", rightLabelX, yPos + 14);
+      doc.text(":", rightLabelX + 20, yPos + 14);
       doc.setFont("times", "normal");
-      doc.text(totalItems.toString(), rightValueX, yPos + 12);
+      doc.text(totalItems.toString(), rightValueX, yPos + 14);
       
-      // Row 3 - Total Quantity (yPos + 18)
+      // Row 3 - Total Quantity
       doc.setFont("times", "bold");
-      doc.text("Total Qty", rightLabelX, yPos + 18);
-      doc.text(":", rightLabelX + 18, yPos + 18);
+      doc.text("Total Qty", rightLabelX, yPos + 21);
+      doc.text(":", rightLabelX + 20, yPos + 21);
       doc.setFont("times", "normal");
-      doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 18);
+      doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 21);
       
-      // Row 4 - Total Sets (yPos + 24)
+      // Row 4 - Total Sets
       doc.setFont("times", "bold");
-      doc.text("Total Sets", rightLabelX, yPos + 24);
-      doc.text(":", rightLabelX + 18, yPos + 24);
+      doc.text("Total Sets", rightLabelX, yPos + 28);
+      doc.text(":", rightLabelX + 20, yPos + 28);
       doc.setFont("times", "normal");
-      doc.text(totalSets.toString(), rightValueX, yPos + 24);
+      doc.text(totalSets.toString(), rightValueX, yPos + 28);
       
-      // Row 5 - Total Value (yPos + 32)
+      // Row 5 - Total Value
       doc.setFont("times", "bold");
-      doc.text("Total Value", rightLabelX, yPos + 32);
-      doc.text(":", rightLabelX + 18, yPos + 32);
+      doc.text("Total Value", rightLabelX, yPos + 35);
+      doc.text(":", rightLabelX + 20, yPos + 35);
       doc.setFont("times", "normal");
-      doc.text("To be calculated", rightValueX, yPos + 32);
+      doc.text("To be calculated", rightValueX, yPos + 35);
 
-      return yPos + boxHeight + 5;
+      return yPos + boxHeight + 8; // Increased from +5 for better spacing
     };
 
     const drawTableHeader = (yPos, docType) => {
@@ -2255,7 +2789,7 @@ const generatePackingList = async (packingData) => {
           { header: "S.No", width: 10 },
           { header: "Lot Number", width: 20 },
           { header: "Brand", width: 25 },
-          { header: "Description", width: 45 },
+          { header: "Description", width: 45 }, // Reduced slightly to accommodate larger fonts
           { header: "Sets", width: 17 },
           { header: "Pc/Set", width: 17 },
           { header: "Loose Pc", width: 17 },
@@ -2267,7 +2801,7 @@ const generatePackingList = async (packingData) => {
           { header: "S.No", width: 10 },
           { header: "Lot Number", width: 20 },
           { header: "Brand", width: 25 },
-          { header: "Description", width: 50 },
+          { header: "Description", width: 50 }, // Reduced slightly to accommodate larger fonts
           { header: "Sets", width: 17 },
           { header: "Pc/Set", width: 17 },
           { header: "Loose Pc", width: 17 },
@@ -2276,25 +2810,26 @@ const generatePackingList = async (packingData) => {
       }
 
       doc.setFont("times", "bold");
+      doc.setFontSize(11); // Increased from default for table headers
       doc.setFillColor(240, 240, 240);
-      doc.rect(leftMargin, yPos, contentWidth, 10, 'F');
-      doc.rect(leftMargin, yPos, contentWidth, 10);
+      doc.rect(leftMargin, yPos, contentWidth, 12, 'F'); // Increased height from 10 to 12
+      doc.rect(leftMargin, yPos, contentWidth, 12);
       
       let currentX = leftMargin;
       tableColumns.forEach(col => {
         const textWidth = doc.getTextWidth(col.header);
         const textX = currentX + (col.width / 2) - (textWidth / 2);
-        doc.text(col.header, textX, yPos + 7);
+        doc.text(col.header, textX, yPos + 8); // Adjusted Y position
         currentX += col.width;
         if (currentX < pageWidth - rightMargin) {
-          doc.line(currentX, yPos, currentX, yPos + 10);
+          doc.line(currentX, yPos, currentX, yPos + 12);
         }
       });
       
-      return yPos + 10;
+      return yPos + 12;
     };
 
-    const drawCheckbox = (x, y, size = 3) => {
+    const drawCheckbox = (x, y, size = 3) => { // Increased size from 3 to 4
       doc.rect(x, y, size, size);
     };
 
@@ -2313,7 +2848,7 @@ const generatePackingList = async (packingData) => {
         ];
       }
       
-      const rowHeight = 10;
+      const rowHeight = 12; // Increased from 10 for larger fonts
 
       doc.rect(leftMargin, yPos, contentWidth, rowHeight);
       
@@ -2333,7 +2868,7 @@ const generatePackingList = async (packingData) => {
           item.brand || "",
           (() => {
             let description = item.description || "";
-            const maxChars = 27;
+            const maxChars = 25; // Reduced from 27 due to larger font
             if (description.length > maxChars) {
               description = description.substring(0, maxChars - 3) + "...";
             }
@@ -2352,7 +2887,7 @@ const generatePackingList = async (packingData) => {
           item.brand || "",
           (() => {
             let description = item.description || "";
-            const maxChars = 35;
+            const maxChars = 33; // Reduced from 35 due to larger font
             if (description.length > maxChars) {
               description = description.substring(0, maxChars - 3) + "...";
             }
@@ -2365,17 +2900,20 @@ const generatePackingList = async (packingData) => {
         ];
       }
 
+      doc.setFont("times", "normal");
+      doc.setFontSize(10); // Increased from default for table content
+      
       let textX = leftMargin;
       values.forEach((value, colIndex) => {
         const textWidth = doc.getTextWidth(value);
         const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
         
         if (colIndex === tableColumns.length - 1 && docType.name === "Account") {
-          const checkboxX = textX + (tableColumns[colIndex].width / 2) - 2;
-          const checkboxY = yPos + (rowHeight / 2) - 2;
-          drawCheckbox(checkboxX, checkboxY, 4);
+          const checkboxX = textX + (tableColumns[colIndex].width / 2) - 3;
+          const checkboxY = yPos + (rowHeight / 2) - 3;
+          drawCheckbox(checkboxX, checkboxY, 4.5);
         } else {
-          doc.text(value, textXPos, yPos + 8);
+          doc.text(value, textXPos, yPos + 8); // Adjusted Y position
         }
         
         textX += tableColumns[colIndex].width;
@@ -2391,19 +2929,19 @@ const generatePackingList = async (packingData) => {
       doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
       
       if (isLastPage && docType.name === "Account") {
-        doc.setFontSize(8);
+        doc.setFontSize(9); // Increased from 8
         doc.setTextColor(100, 100, 100);
-        doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 6);
+        // doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 7);
         doc.setTextColor(0, 0, 0);
       }
       
-      return yPos + 15;
+      return yPos + 18; // Increased from 15
     };
 
     const drawSignatures = (docType, yPos) => {
-      const footerY = pageHeight - 20;
+      const footerY = pageHeight - 25; // Adjusted for larger fonts
       doc.setFont("times", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(10); // Increased from 9
       
       doc.setLineWidth(0.3);
       
@@ -2412,47 +2950,46 @@ const generatePackingList = async (packingData) => {
       
       doc.text("Prepared By", currentX + 5, footerY);
       doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text(`${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, currentX + 5, footerY + 8);
+      doc.setFontSize(8); // Increased from 7
+      doc.text(`${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, currentX + 5, footerY + 9);
       
       currentX += sectionWidth;
-      doc.setFontSize(9);
+      doc.setFontSize(10);
       doc.text("Account Officer", currentX + 5, footerY);
       doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
       
       currentX += sectionWidth;
-      doc.setFontSize(9);
+      doc.setFontSize(10);
       doc.text("Checked By", currentX + 5, footerY);
       doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
       
       currentX += sectionWidth;
-      doc.setFontSize(9);
+      doc.setFontSize(10);
       doc.text("Authorized Signatory", currentX + 5, footerY);
       doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", currentX + 5, footerY + 9);
       
-      doc.setFontSize(7);
+      doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
-      doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 8);
+      doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 10);
       doc.setTextColor(0, 0, 0);
       
-      doc.setFontSize(7);
+      doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       if (docType.name === "Account") {
-        doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 15, { align: "center" });
-      } else if (docType.name === "Audit") {
-        doc.text("Audit reference document", pageWidth / 2, footerY - 15, { align: "center" });
+        doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 18, { align: "center" });
       } else if (docType.name === "Customer") {
-        doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 15, { align: "center" });
+        doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 18, { align: "center" });
       }
       doc.setTextColor(0, 0, 0);
     };
 
+    // Generate only Customer and Account pages
     for (let docIndex = 0; docIndex < documentTypes.length; docIndex++) {
       const docType = documentTypes[docIndex];
       let itemsProcessed = 0;
@@ -2488,7 +3025,7 @@ const generatePackingList = async (packingData) => {
           drawSignatures(docType, yPos);
         } else {
           yPos += 5;
-          doc.setFontSize(8);
+          doc.setFontSize(9); // Increased from 8
           doc.setTextColor(100, 100, 100);
           doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
           doc.setTextColor(0, 0, 0);
@@ -2501,12 +3038,12 @@ const generatePackingList = async (packingData) => {
     const pageCount = doc.internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      doc.setFontSize(8);
+      doc.setFontSize(9); // Increased from 8
       doc.setTextColor(100, 100, 100);
       doc.text(
         `Page ${i} of ${pageCount}`,
         pageWidth / 2,
-        pageHeight - 8,
+        pageHeight - 10, // Adjusted from -8
         { align: "center" }
       );
       doc.setTextColor(0, 0, 0);
@@ -3592,8 +4129,9 @@ const EditItemModal = () => {
       {isDebugModalOpen && <DebugConsoleModal />}
       {isEditModalOpen && <EditItemModal />}
       {isConfirmModalOpen && <ConfirmationModal />}
+          <DraftSavingOverlay />
       {isLotDetailsModalOpen && <LotDetailsModal />}
-      {isPackingMaterialsModalOpen && <PackingMaterialsModal />}
+      {/* {isPackingMaterialsModalOpen && <PackingMaterialsModal />} */}
 
       <div className="blue-user-bar" style={{
         backgroundColor: '#f0f4ff',

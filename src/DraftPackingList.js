@@ -51,20 +51,13 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
   const [savingToSheet, setSavingToSheet] = useState(false);
   const [processingStage, setProcessingStage] = useState(null);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [draftToConvert, setDraftToConvert] = useState(null);
   
   // Product database state
   const [sheetData, setSheetData] = useState([]);
   const [oldLotData, setOldLotData] = useState([]);
   const [loadingProductData, setLoadingProductData] = useState(false);
-  
-  // Packing materials state
-  const [packingMaterials, setPackingMaterials] = useState({
-    totalBoxes: 0,
-    totalBags: 0,
-    totalPolybags: 0
-  });
-  const [isPackingMaterialsModalOpen, setIsPackingMaterialsModalOpen] = useState(false);
-  const [tempDraftForConversion, setTempDraftForConversion] = useState(null);
   
   // Local edited drafts (not saved to Google Sheets)
   const [localEditedDrafts, setLocalEditedDrafts] = useState({});
@@ -144,9 +137,6 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
             createdDate: jsonData.createdDate || (createdDateIndex !== -1 ? row[createdDateIndex] : new Date().toISOString()),
             lastModified: lastModifiedIndex !== -1 ? row[lastModifiedIndex] : new Date().toISOString(),
             totalItems: jsonData.totalQuantity || (totalQuantityIndex !== -1 ? row[totalQuantityIndex] : 0),
-            totalBoxes: jsonData.totalBoxes || 0,
-            totalBags: jsonData.totalBags || 0,
-            totalPolybags: jsonData.totalPolybags || 0,
             preparedBy: jsonData.preparedBy || '',
             preparedByRole: jsonData.preparedByRole || '',
             preparedByEmail: jsonData.preparedByEmail || ''
@@ -504,9 +494,23 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
         }
         
         const brandIndicators = [
-          'ADIDAS', 'NIKE', 'PUMA', 'REEBOK', 'UNDERARMOUR', 'GUCCI', 'LOUISVUITTON',
-          'BALENCIAGA', 'ESSENTIALS', 'AMIRI', 'OFFWHITE', 'DIESEL', 'H&M', 'ZARA',
-          'GIRLISH', 'R.L.POLO', 'LACOSTE', 'BROOKSBROTHERS', 'POLO', 'TOMMY', 'CALVINKLEIN','DIOR','HERMES','ZARA','VERSACE','THE NORTHFACE','HACKET','L.V'
+          'ADIDAS','NIKE','PUMA','REEBOK','UNDER ARMOUR','GYMSHARK','ASICS','NEW BALANCE',
+          'FILA','COLUMBIA','THE NORTH FACE','PATAGONIA','SALOMON','DECATHLON','KAPPA',
+          'UMBRO','JORDAN','SKECHERS','LACOSTE','UNDER ARMOUR','GUCCI','LOUIS VUITTON',
+          'BALENCIAGA','DIOR','HERMES','PRADA','VERSACE','FENDI','BURBERRY','ARMANI',
+          'VALENTINO','GIVENCHY','YVES SAINT LAURENT','SAINT LAURENT','BOTTEGA VENETA',
+          'ALEXANDER MCQUEEN','OFF WHITE','AMIRI','DOLCE & GABBANA','HOODRICH',
+          'CALVIN KLEIN','TOMMY HILFIGER','RALPH LAUREN','POLO','R.L. POLO','LACOSTE',
+          'HUGO BOSS','MICHAEL KORS','COACH','KATE SPADE','BROOKS BROTHERS','DKNY',
+          'ZARA','H&M','UNIQLO','FOREVER 21','BERSHKA','PULL & BEAR','STRADIVARIUS',
+          'MANGO','TOPSHOP','NEXT','GAP','OLD NAVY','PRIMARK','LEVIS','LEE','WRANGLER',
+          'DIESEL','G-STAR','PEPE JEANS','TRUE RELIGION','SUPREME','BAPE','PALACE',
+          'STUSSY','FEAR OF GOD','ESSENTIALS','CARHARTT','OFF-WHITE','A BATHING APE',
+          'KITH','VLONE','ANTI SOCIAL SOCIAL CLUB','ABERCROMBIE','HOLLISTER',
+          'AEROPOSTALE','AMERICAN EAGLE','SUPERDRY','JACK & JONES','ONLY','VERO MODA',
+          'GANT','ALLEN SOLLY','PETER ENGLAND','LOUIS PHILIPPE','VAN HEUSEN','FABINDIA',
+          'BIBA','W FOR WOMAN','MANYAVAR','RAYMOND','BLACKBERRYS','MUFTI','SPYKAR',
+          'FASHION FACTORY','LORO PIANA','ESSENTIAL','GIRLISH','ESSENTIALS','HOLISTER'
         ];
         
         const words = remainingDescription.split(/\s+/);
@@ -530,7 +534,7 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
       }
       
       if (!itemName) itemName = `Lot ${lotNumber}`;
-      if (!brand) brand = 'OLD STOCK';
+      if (!brand) brand = '----';
       if (piecesPerSet === 0) piecesPerSet = 5;
       
       parsedProducts.push({
@@ -910,596 +914,77 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
     }
   };
 
-  // ==================== PDF GENERATION FUNCTION ====================
+  // ==================== CONFIRMATION MODAL ====================
   
-const generatePackingListPDF = async (packingData) => {
-  if (!packingData || !packingData.items || packingData.items.length === 0) {
-    console.error("Invalid packing data");
-    return false;
-  }
-
-  try {
-    const documentTypes = [
-      { name: "Customer", subheading: "PACKING LIST FOR CUSTOMER" },
-      { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" },
-      { name: "Audit", subheading: "PACKING LIST FOR AUDIT" }
-    ];
-
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const leftMargin = 15;
-    const rightMargin = 15;
-    const contentWidth = pageWidth - leftMargin - rightMargin;
-
-    const uniqueLots = new Set(packingData.items.map(item => item.lotNumber)).size;
-    const totalItems = packingData.items.length;
-    const totalQuantity = packingData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-    const totalSets = packingData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
-
-    const MAX_ROWS_PER_PAGE = 14;
-
-    const drawPageBorder = () => {
-      doc.setLineWidth(0.5);
-      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
-      doc.setLineWidth(0.3);
-    };
-
-    const drawHeader = (docType, yPos) => {
-      doc.setFont("times", "bold");
-      doc.setFontSize(22);
-      doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
-      yPos += 8;
-      
-      doc.setFontSize(14);
-      doc.setFont("times", "bold");
-      doc.setTextColor(70, 70, 200);
-      doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
-      doc.setTextColor(0, 0, 0);
-      yPos += 12;
-
-      // Add Bill To information centered (without prefix)
-      const partyName = packingData.partyName || 'N/A';
-      const maxWidth = contentWidth;
-      const billToTextWidth = doc.getTextWidth(partyName);
-      
-      doc.setFont("times", "bold");
-      doc.setFontSize(12);
-      doc.setTextColor(0, 0, 0);
-      
-      if (billToTextWidth > maxWidth) {
-        let remainingName = partyName;
-        let lines = [];
-        
-        while (remainingName.length > 0) {
-          let line = "";
-          for (let i = 0; i < remainingName.length; i++) {
-            const testLine = line + remainingName[i];
-            if (doc.getTextWidth(testLine) <= maxWidth) {
-              line = testLine;
-            } else {
-              break;
-            }
-          }
-          lines.push(line);
-          remainingName = remainingName.substring(line.length);
-        }
-        
-        for (let i = 0; i < lines.length; i++) {
-          doc.text(lines[i], pageWidth / 2, yPos, { align: "center" });
-          yPos += 6;
-        }
-        yPos += 2;
-      } else {
-        doc.text(partyName, pageWidth / 2, yPos, { align: "center" });
-        yPos += 8;
-      }
-      
-      // Draw the main box - equally divided (50% each side)
-      const boxHeight = 38;
-      doc.rect(leftMargin, yPos, contentWidth, boxHeight);
-      
-      // Split exactly in the middle
-      const midPoint = leftMargin + (contentWidth / 2);
-      doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
-
-      // LEFT SIDE CONTENT
-      const leftLabelX = leftMargin + 5;
-      const leftValueX = leftMargin + 38;
-      const leftMaxWidth = midPoint - leftValueX - 3;
-      
-      doc.setFont("times", "bold");
-      doc.setFontSize(9);
-      
-      doc.text("Date", leftLabelX, yPos + 6);
-      doc.text(":", leftLabelX + 18, yPos + 6);
-      doc.setFont("times", "normal");
-      doc.text(`${packingData.dispatchDate || packingData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 6);
-      
-      doc.setFont("times", "bold");
-      doc.text("Order Ref", leftLabelX, yPos + 12);
-      doc.text(":", leftLabelX + 18, yPos + 12);
-      doc.setFont("times", "normal");
-      let orderRef = `${packingData.orderNo || packingData.orderReference || 'N/A'}`;
-      if (doc.getTextWidth(orderRef) > leftMaxWidth) {
-        orderRef = orderRef.substring(0, 20) + "...";
-      }
-      doc.text(orderRef, leftValueX, yPos + 12);
-      
-      doc.setFont("times", "bold");
-      doc.text("Doc No", leftLabelX, yPos + 18);
-      doc.text(":", leftLabelX + 18, yPos + 18);
-      doc.setFont("times", "normal");
-      doc.text(`${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || 'N/A'}`, leftValueX, yPos + 18);
-      
-      doc.setFont("times", "bold");
-      doc.text("Generated By", leftLabelX, yPos + 24);
-      doc.text(":", leftLabelX + 18, yPos + 24);
-      doc.setFont("times", "normal");
-      const preparedByText = `${packingData.preparedBy || preparedBy}`;
-      const preparedByRole = `${packingData.preparedByRole || userRole}`;
-      const fullPreparedText = `${preparedByText} (${preparedByRole})`;
-      
-      if (doc.getTextWidth(fullPreparedText) > leftMaxWidth) {
-        doc.text(preparedByText, leftValueX, yPos + 24);
-        doc.text(`(${preparedByRole})`, leftValueX, yPos + 30);
-      } else {
-        doc.text(fullPreparedText, leftValueX, yPos + 24);
-      }
-      
-      doc.setFont("times", "bold");
-      doc.text("Packing Materials", leftLabelX, yPos + 32);
-      doc.text(":", leftLabelX + 18, yPos + 32);
-      doc.setFont("times", "normal");
-      
-      const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
-      const materialParts = [];
-      
-      if (packingMaterials.totalBoxes > 0) {
-        materialParts.push(`${packingMaterials.totalBoxes} Box${packingMaterials.totalBoxes !== 1 ? 'es' : ''}`);
-      }
-      if (packingMaterials.totalBags > 0) {
-        materialParts.push(`${packingMaterials.totalBags} Bag${packingMaterials.totalBags !== 1 ? 's' : ''}`);
-      }
-      if (packingMaterials.totalPolybags > 0) {
-        materialParts.push(`${packingMaterials.totalPolybags} Polybag${packingMaterials.totalPolybags !== 1 ? 's' : ''}`);
-      }
-      
-      const materialsText = materialParts.length > 0 ? materialParts.join(', ') : 'None';
-      
-      if (doc.getTextWidth(materialsText) > leftMaxWidth) {
-        let remainingText = materialsText;
-        let currentY = yPos + 32;
-        while (remainingText.length > 0) {
-          let line = "";
-          for (let i = 0; i < remainingText.length; i++) {
-            const testLine = line + remainingText[i];
-            if (doc.getTextWidth(testLine) <= leftMaxWidth) {
-              line = testLine;
-            } else {
-              break;
-            }
-          }
-          doc.text(line, leftValueX, currentY);
-          remainingText = remainingText.substring(line.length);
-          currentY += 5;
-        }
-      } else {
-        doc.text(materialsText, leftValueX, yPos + 32);
-      }
-
-      // RIGHT SIDE CONTENT
-      const rightLabelX = midPoint + 5;
-      const rightValueX = midPoint + 35;
-      
-      doc.setFont("times", "bold");
-      doc.setFontSize(9);
-      
-      doc.text("Total Lots", rightLabelX, yPos + 6);
-      doc.text(":", rightLabelX + 18, yPos + 6);
-      doc.setFont("times", "normal");
-      doc.text(uniqueLots.toString(), rightValueX, yPos + 6);
-      
-      doc.setFont("times", "bold");
-      doc.text("Total Items", rightLabelX, yPos + 12);
-      doc.text(":", rightLabelX + 18, yPos + 12);
-      doc.setFont("times", "normal");
-      doc.text(totalItems.toString(), rightValueX, yPos + 12);
-      
-      doc.setFont("times", "bold");
-      doc.text("Total Qty", rightLabelX, yPos + 18);
-      doc.text(":", rightLabelX + 18, yPos + 18);
-      doc.setFont("times", "normal");
-      doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 18);
-      
-      doc.setFont("times", "bold");
-      doc.text("Total Sets", rightLabelX, yPos + 24);
-      doc.text(":", rightLabelX + 18, yPos + 24);
-      doc.setFont("times", "normal");
-      doc.text(totalSets.toString(), rightValueX, yPos + 24);
-      
-      doc.setFont("times", "bold");
-      doc.text("Total Value", rightLabelX, yPos + 32);
-      doc.text(":", rightLabelX + 18, yPos + 32);
-      doc.setFont("times", "normal");
-      doc.text("To be calculated", rightValueX, yPos + 32);
-
-      return yPos + boxHeight + 5;
-    };
-
-    const drawTableHeader = (yPos, docType) => {
-      let tableColumns;
-      
-      if (docType.name === "Account") {
-        tableColumns = [
-          { header: "S.No", width: 10 },
-          { header: "Lot Number", width: 20 },
-          { header: "Brand", width: 25 },
-          { header: "Description", width: 45 },
-          { header: "Sets", width: 17 },
-          { header: "Pc/Set", width: 17 },
-          { header: "Loose Pc", width: 17 },
-          { header: "Total Qty", width: 20 },
-          { header: "✓", width: 8 }
-        ];
-      } else {
-        tableColumns = [
-          { header: "S.No", width: 10 },
-          { header: "Lot Number", width: 20 },
-          { header: "Brand", width: 25 },
-          { header: "Description", width: 50 },
-          { header: "Sets", width: 17 },
-          { header: "Pc/Set", width: 17 },
-          { header: "Loose Pc", width: 17 },
-          { header: "Total Qty", width: 23 }
-        ];
-      }
-
-      doc.setFont("times", "bold");
-      doc.setFillColor(240, 240, 240);
-      doc.rect(leftMargin, yPos, contentWidth, 10, 'F');
-      doc.rect(leftMargin, yPos, contentWidth, 10);
-      
-      let currentX = leftMargin;
-      tableColumns.forEach(col => {
-        const textWidth = doc.getTextWidth(col.header);
-        const textX = currentX + (col.width / 2) - (textWidth / 2);
-        doc.text(col.header, textX, yPos + 7);
-        currentX += col.width;
-        if (currentX < pageWidth - rightMargin) {
-          doc.line(currentX, yPos, currentX, yPos + 10);
-        }
-      });
-      
-      return yPos + 10;
-    };
-
-    const drawCheckbox = (x, y, size = 3) => {
-      doc.rect(x, y, size, size);
-    };
-
-    const drawTableRow = (item, index, yPos, docType) => {
-      let tableColumns;
-      
-      if (docType.name === "Account") {
-        tableColumns = [
-          { width: 10 }, { width: 20 }, { width: 25 }, { width: 45 },
-          { width: 17 }, { width: 17 }, { width: 17 }, { width: 20 }, { width: 8 }
-        ];
-      } else {
-        tableColumns = [
-          { width: 10 }, { width: 20 }, { width: 25 }, { width: 50 },
-          { width: 17 }, { width: 17 }, { width: 17 }, { width: 23 }
-        ];
-      }
-      
-      const rowHeight = 10;
-
-      doc.rect(leftMargin, yPos, contentWidth, rowHeight);
-      
-      let colX = leftMargin;
-      tableColumns.forEach(col => {
-        colX += col.width;
-        if (colX < pageWidth - rightMargin) {
-          doc.line(colX, yPos, colX, yPos + rowHeight);
-        }
-      });
-
-      let values;
-      if (docType.name === "Account") {
-        values = [
-          (index + 1).toString(),
-          item.lotNumber || "",
-          item.brand || "",
-          (() => {
-            let description = item.description || "";
-            const maxChars = 27;
-            if (description.length > maxChars) {
-              description = description.substring(0, maxChars - 3) + "...";
-            }
-            return description;
-          })(),
-          (item.sets || 0).toString(),
-          (item.setsPerPcs || 0).toString(),
-          (item.loosePcs || 0).toString(),
-          (item.quantity || 0).toString(),
-          ""
-        ];
-      } else {
-        values = [
-          (index + 1).toString(),
-          item.lotNumber || "",
-          item.brand || "",
-          (() => {
-            let description = item.description || "";
-            const maxChars = 35;
-            if (description.length > maxChars) {
-              description = description.substring(0, maxChars - 3) + "...";
-            }
-            return description;
-          })(),
-          (item.sets || 0).toString(),
-          (item.setsPerPcs || 0).toString(),
-          (item.loosePcs || 0).toString(),
-          (item.quantity || 0).toString()
-        ];
-      }
-
-      let textX = leftMargin;
-      values.forEach((value, colIndex) => {
-        const textWidth = doc.getTextWidth(value);
-        const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
-        
-        if (colIndex === tableColumns.length - 1 && docType.name === "Account") {
-          const checkboxX = textX + (tableColumns[colIndex].width / 2) - 2;
-          const checkboxY = yPos + (rowHeight / 2) - 2;
-          drawCheckbox(checkboxX, checkboxY, 4);
-        } else {
-          doc.text(value, textXPos, yPos + 8);
-        }
-        
-        textX += tableColumns[colIndex].width;
-      });
-
-      return rowHeight;
-    };
-
-    const drawTableFooter = (yPos, isLastPage, docType) => {
-      yPos += 5;
-      
-      doc.setLineWidth(0.5);
-      doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
-      
-      if (isLastPage && docType.name === "Account") {
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 6);
-        doc.setTextColor(0, 0, 0);
-      }
-      
-      return yPos + 15;
-    };
-
-    const drawSignatures = (docType, yPos) => {
-      const footerY = pageHeight - 20;
-      doc.setFont("times", "bold");
-      doc.setFontSize(9);
-      
-      doc.setLineWidth(0.3);
-      
-      const sectionWidth = (contentWidth - 20) / 4;
-      let currentX = leftMargin;
-      
-      doc.text("Prepared By", currentX + 5, footerY);
-      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text(`${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, currentX + 5, footerY + 8);
-      
-      currentX += sectionWidth;
-      doc.setFontSize(9);
-      doc.text("Account Officer", currentX + 5, footerY);
-      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-      
-      currentX += sectionWidth;
-      doc.setFontSize(9);
-      doc.text("Checked By", currentX + 5, footerY);
-      doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-      
-      currentX += sectionWidth;
-      doc.setFontSize(9);
-      doc.text("Authorized Signatory", currentX + 5, footerY);
-      doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
-      doc.setFontSize(7);
-      doc.text("(Name & Signature)", currentX + 5, footerY + 8);
-      
-      doc.setFontSize(7);
-      doc.setTextColor(100, 100, 100);
-      doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 8);
-      doc.setTextColor(0, 0, 0);
-      
-      doc.setFontSize(7);
-      doc.setTextColor(150, 150, 150);
-      if (docType.name === "Account") {
-        doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 15, { align: "center" });
-      } else if (docType.name === "Audit") {
-        doc.text("Audit reference document", pageWidth / 2, footerY - 15, { align: "center" });
-      } else if (docType.name === "Customer") {
-        doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 15, { align: "center" });
-      }
-      doc.setTextColor(0, 0, 0);
-    };
-
-    for (let docIndex = 0; docIndex < documentTypes.length; docIndex++) {
-      const docType = documentTypes[docIndex];
-      let itemsProcessed = 0;
-      let sectionPageCount = 0;
-      
-      while (itemsProcessed < packingData.items.length) {
-        const remainingRows = packingData.items.length - itemsProcessed;
-        const rowsOnThisPage = Math.min(MAX_ROWS_PER_PAGE, remainingRows);
-        const isLastPageOfSection = (itemsProcessed + rowsOnThisPage) === packingData.items.length;
-        
-        let yPos = 15;
-        
-        if (sectionPageCount > 0) {
-          doc.addPage();
-        } else if (docIndex > 0 && sectionPageCount === 0) {
-          doc.addPage();
-        }
-        
-        drawPageBorder();
-        yPos = drawHeader(docType, yPos);
-        yPos = drawTableHeader(yPos, docType);
-        
-        for (let i = 0; i < rowsOnThisPage; i++) {
-          const item = packingData.items[itemsProcessed];
-          const rowHeight = drawTableRow(item, itemsProcessed, yPos, docType);
-          yPos += rowHeight;
-          itemsProcessed++;
-        }
-        
-        yPos = drawTableFooter(yPos, isLastPageOfSection, docType);
-        
-        if (isLastPageOfSection) {
-          drawSignatures(docType, yPos);
-        } else {
-          yPos += 5;
-          doc.setFontSize(8);
-          doc.setTextColor(100, 100, 100);
-          doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
-          doc.setTextColor(0, 0, 0);
-        }
-        
-        sectionPageCount++;
-      }
-    }
-
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(
-        `Page ${i} of ${pageCount}`,
-        pageWidth / 2,
-        pageHeight - 8,
-        { align: "center" }
-      );
-      doc.setTextColor(0, 0, 0);
-    }
-
-    const fileName = `PackingList_${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || packingData.orderNo}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
+  const ConfirmConversionModal = () => {
+    if (!draftToConvert) return null;
     
-    return true;
-
-  } catch (error) {
-    console.error("PDF Generation Error:", error);
-    return false;
-  }
-};
-
-  // Packing Materials Modal Component
-  const PackingMaterialsModal = () => {
-    const [localMaterials, setLocalMaterials] = useState({
-      totalBoxes: packingMaterials.totalBoxes,
-      totalBags: packingMaterials.totalBags,
-      totalPolybags: packingMaterials.totalPolybags
-    });
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleConfirm = async () => {
-      if (isSubmitting) return;
-      
-      setIsSubmitting(true);
-      setPackingMaterials(localMaterials);
-      setIsPackingMaterialsModalOpen(false);
-      await convertToFinalBillWithMaterials(localMaterials);
-      setIsSubmitting(false);
-    };
-
+    const totalItems = draftToConvert.items.length;
+    const totalQuantity = draftToConvert.items.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+    
     return (
-      <div className="modal-overlay" onClick={() => setIsPackingMaterialsModalOpen(false)}>
-        <div className="modal-content modal-medium" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-overlay" onClick={() => setShowConfirmModal(false)}>
+        <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="modal-header-left">
-              <span className="modal-icon">📦</span>
-              <h3>Packing Materials</h3>
-              <span className="modal-badge">Final Bill</span>
+              <span className="modal-icon">⚠️</span>
+              <h3>Confirm Conversion</h3>
             </div>
-            <button className="modal-close" onClick={() => setIsPackingMaterialsModalOpen(false)}>✕</button>
+            <button className="modal-close" onClick={() => setShowConfirmModal(false)}>✕</button>
           </div>
           
           <div className="modal-body">
-            <div className="info-message">
-              <span>ℹ️</span>
-              <p>Please enter the packing materials details for this dispatch</p>
-            </div>
-
-            <div className="form-field">
-              <label>📦 Total Boxes</label>
-              <input 
-                type="number" 
-                value={localMaterials.totalBoxes} 
-                onChange={(e) => setLocalMaterials({ ...localMaterials, totalBoxes: parseInt(e.target.value) || 0 })} 
-                className="form-input" 
-                placeholder="Enter number of boxes"
-                autoFocus
-                min="0"
-              />
+            <div className="warning-message">
+              <span>📄</span>
+              <p>You are about to convert this draft to a FINAL BILL</p>
             </div>
             
-            <div className="form-field">
-              <label>🛍️ Total Bags</label>
-              <input 
-                type="number" 
-                value={localMaterials.totalBags} 
-                onChange={(e) => setLocalMaterials({ ...localMaterials, totalBags: parseInt(e.target.value) || 0 })} 
-                className="form-input" 
-                placeholder="Enter number of bags"
-                min="0"
-              />
-            </div>
-            
-            <div className="form-field">
-              <label>📎 Total Polythene Bags</label>
-              <input 
-                type="number" 
-                value={localMaterials.totalPolybags} 
-                onChange={(e) => setLocalMaterials({ ...localMaterials, totalPolybags: parseInt(e.target.value) || 0 })} 
-                className="form-input" 
-                placeholder="Enter number of polythene bags"
-                min="0"
-              />
-            </div>
-
-            <div className="summary-box">
-              <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Summary</div>
-              <div className="summary-row">
-                <span>Total Items:</span>
-                <strong>{tempDraftForConversion?.items.length || 0}</strong>
+            <div className="draft-summary">
+              <div className="summary-title">Draft Summary:</div>
+              <div className="summary-details">
+                <div className="summary-row">
+                  <span>Order Number:</span>
+                  <strong>{draftToConvert.orderNo}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Party Name:</span>
+                  <strong>{draftToConvert.partyName}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Total Items:</span>
+                  <strong>{totalItems}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Total Quantity:</span>
+                  <strong>{totalQuantity} PCS</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Dispatch Date:</span>
+                  <strong>{draftToConvert.dispatchDate || 'Not set'}</strong>
+                </div>
               </div>
-              <div className="summary-row">
-                <span>Total Quantity:</span>
-                <strong>{tempDraftForConversion?.items.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0) || 0} PCS</strong>
+            </div>
+            
+            <div className="info-box">
+              <div className="info-icon">ℹ️</div>
+              <div className="info-text">
+                <strong>What will happen?</strong>
+                <ul>
+                  <li>✓ A final bill number will be generated (PL-XXX)</li>
+                  <li>✓ PDF will be downloaded automatically</li>
+                  <li>✓ Data will be saved permanently to Google Sheets</li>
+                  <li>✓ This draft will be removed from drafts list</li>
+                </ul>
               </div>
             </div>
           </div>
           
           <div className="modal-footer">
-            <button onClick={() => setIsPackingMaterialsModalOpen(false)} className="btn-secondary">
+            <button onClick={() => setShowConfirmModal(false)} className="btn-secondary">
               Cancel
             </button>
-            <button 
-              onClick={handleConfirm} 
-              className="btn-primary btn-large"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? "Processing..." : "✅ Confirm & Save to Sheet"}
+            <button onClick={handleConfirmConversion} className="btn-primary btn-danger">
+              ✅ Confirm & Convert to Final Bill
             </button>
           </div>
         </div>
@@ -1507,14 +992,28 @@ const generatePackingListPDF = async (packingData) => {
     );
   };
 
-  // Convert draft to final bill with PDF download and save to Google Sheets
-  const convertToFinalBillWithMaterials = async (materials) => {
-    if (!tempDraftForConversion) return;
+  // Convert draft to final bill with confirmation
+  const handleConvertToFinal = (draft) => {
+    if (!draft || draft.items.length === 0) {
+      alert("No items in this draft to convert");
+      return;
+    }
+    
+    // Use the latest version of the draft (with local edits if any)
+    const currentDraft = getCurrentDraft(draft.id);
+    setDraftToConvert(currentDraft);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmConversion = async () => {
+    if (!draftToConvert) return;
     
     if (savingToSheet) {
       addDebugMessage("Already processing, please wait...", 'warning');
       return;
     }
+    
+    setShowConfirmModal(false);
     
     try {
       setSavingToSheet(true);
@@ -1522,20 +1021,20 @@ const generatePackingListPDF = async (packingData) => {
       
       const billNumber = await getNextBillNumber('PL');
       
-      const totalQuantity = tempDraftForConversion.items.reduce((sum, item) => {
+      const totalQuantity = draftToConvert.items.reduce((sum, item) => {
         return sum + (parseInt(item.quantity) || 0);
       }, 0);
       
       const finalBillData = {
         billNumber: billNumber,
         packingNumber: billNumber,
-        partyName: tempDraftForConversion.partyName,
-        orderNo: tempDraftForConversion.orderNo,
-        orderReference: tempDraftForConversion.orderNo,
-        dispatchDate: tempDraftForConversion.dispatchDate || new Date().toISOString().split('T')[0],
-        billDate: tempDraftForConversion.dispatchDate || new Date().toISOString().split('T')[0],
+        partyName: draftToConvert.partyName,
+        orderNo: draftToConvert.orderNo,
+        orderReference: draftToConvert.orderNo,
+        dispatchDate: draftToConvert.dispatchDate || new Date().toISOString().split('T')[0],
+        billDate: draftToConvert.dispatchDate || new Date().toISOString().split('T')[0],
         dueDate: "",
-        items: tempDraftForConversion.items.map((item, idx) => ({
+        items: draftToConvert.items.map((item, idx) => ({
           id: Date.now() + idx,
           barcode: item.barcode || item.lotNumber,
           lotNumber: item.lotNumber,
@@ -1550,17 +1049,17 @@ const generatePackingListPDF = async (packingData) => {
           colors: [],
           sizes: []
         })),
-        notes: tempDraftForConversion.notes,
-        deliveryAddress: tempDraftForConversion.deliveryAddress,
-        specialInstructions: tempDraftForConversion.specialInstructions,
-        priority: tempDraftForConversion.priority,
+        notes: draftToConvert.notes,
+        deliveryAddress: draftToConvert.deliveryAddress,
+        specialInstructions: draftToConvert.specialInstructions,
+        priority: draftToConvert.priority,
         packingMaterials: {
-          totalBoxes: parseInt(materials.totalBoxes) || 0,
-          totalBags: parseInt(materials.totalBags) || 0,
-          totalPolybags: parseInt(materials.totalPolybags) || 0
+          totalBoxes: 0,
+          totalBags: 0,
+          totalPolybags: 0
         },
         totalQuantity: totalQuantity,
-        totalItems: tempDraftForConversion.items.length,
+        totalItems: draftToConvert.items.length,
         createdDate: new Date().toISOString(),
         preparedBy: preparedBy,
         preparedByRole: userRole,
@@ -1570,7 +1069,6 @@ const generatePackingListPDF = async (packingData) => {
       };
       
       addDebugMessage(`Converting draft to final bill: ${billNumber}`, 'info');
-      addDebugMessage(`Packing materials: Boxes=${materials.totalBoxes}, Bags=${materials.totalBags}, Polybags=${materials.totalPolybags}`, 'info');
       
       // Generate and download PDF FIRST
       addDebugMessage("Generating PDF...", 'info');
@@ -1591,11 +1089,10 @@ const generatePackingListPDF = async (packingData) => {
         addDebugMessage(`Final bill ${billNumber} saved successfully`, 'success');
         
         // Delete the draft from Google Sheets (if it exists there)
-        // Check if this draft originally came from Google Sheets
-        const originalDraft = drafts.find(d => d.id === tempDraftForConversion.id);
+        const originalDraft = drafts.find(d => d.id === draftToConvert.id);
         if (originalDraft) {
-          addDebugMessage(`Deleting draft ${tempDraftForConversion.id} from Google Sheets...`, 'info');
-          const deleted = await deleteDraftFromSheet(tempDraftForConversion.id);
+          addDebugMessage(`Deleting draft ${draftToConvert.id} from Google Sheets...`, 'info');
+          const deleted = await deleteDraftFromSheet(draftToConvert.id);
           
           if (deleted) {
             addDebugMessage(`Draft deleted successfully`, 'success');
@@ -1605,10 +1102,10 @@ const generatePackingListPDF = async (packingData) => {
         }
         
         // Remove from local state
-        setDrafts(prev => prev.filter(d => d.id !== tempDraftForConversion.id));
+        setDrafts(prev => prev.filter(d => d.id !== draftToConvert.id));
         setLocalEditedDrafts(prev => {
           const newState = { ...prev };
-          delete newState[tempDraftForConversion.id];
+          delete newState[draftToConvert.id];
           return newState;
         });
         
@@ -1620,12 +1117,11 @@ const generatePackingListPDF = async (packingData) => {
           onConvertToDispatch(finalBillData);
         }
         
-        // Clear temp data
-        setTempDraftForConversion(null);
         setSelectedDraft(null);
+        setDraftToConvert(null);
         
         // Show success message
-        alert(`✅ Successfully converted to final bill!\n\n📄 Bill Number: ${billNumber}\n📦 Boxes: ${materials.totalBoxes}\n🛍️ Bags: ${materials.totalBags}\n📎 Polybags: ${materials.totalPolybags}\n\n📄 PDF downloaded successfully!\n💾 Saved permanently to Google Sheets.`);
+        alert(`✅ Successfully converted to final bill!\n\n📄 Bill Number: ${billNumber}\n📄 PDF downloaded successfully!\n💾 Saved permanently to Google Sheets.`);
         
       } else {
         throw new Error("Failed to save final bill");
@@ -1638,19 +1134,500 @@ const generatePackingListPDF = async (packingData) => {
     } finally {
       setSavingToSheet(false);
       setProcessingStage(null);
+      setDraftToConvert(null);
     }
   };
 
-  const handleConvertToFinal = (draft) => {
-    if (!draft || draft.items.length === 0) {
-      alert("No items in this draft to convert");
-      return;
+  // ==================== PDF GENERATION FUNCTION ====================
+  
+  const generatePackingListPDF = async (packingData) => {
+    if (!packingData || !packingData.items || packingData.items.length === 0) {
+      console.error("Invalid packing data");
+      return false;
     }
-    
-    // Use the latest version of the draft (with local edits if any)
-    const currentDraft = getCurrentDraft(draft.id);
-    setTempDraftForConversion(currentDraft);
-    setIsPackingMaterialsModalOpen(true);
+
+    try {
+   const documentTypes = [
+  { name: "Customer", subheading: "PACKING LIST FOR CUSTOMER" },
+  { name: "Account", subheading: "PACKING LIST FOR ACCOUNT OFFICE" }
+];
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const leftMargin = 15;
+      const rightMargin = 15;
+      const contentWidth = pageWidth - leftMargin - rightMargin;
+
+      const uniqueLots = new Set(packingData.items.map(item => item.lotNumber)).size;
+      const totalItems = packingData.items.length;
+      const totalQuantity = packingData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const totalSets = packingData.items.reduce((sum, item) => sum + (parseInt(item.sets) || 0), 0);
+
+      const MAX_ROWS_PER_PAGE = 14;
+
+      const drawPageBorder = () => {
+        doc.setLineWidth(0.5);
+        doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+        doc.setLineWidth(0.3);
+      };
+
+      const drawHeader = (docType, yPos) => {
+        doc.setFont("times", "bold");
+        doc.setFontSize(22);
+        doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
+        yPos += 8;
+        
+        doc.setFontSize(14);
+        doc.setFont("times", "bold");
+        doc.setTextColor(70, 70, 200);
+        doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
+        doc.setTextColor(0, 0, 0);
+        yPos += 12;
+
+        // Add Bill To information centered
+        const partyName = packingData.partyName || 'N/A';
+        const maxWidth = contentWidth;
+        const billToTextWidth = doc.getTextWidth(partyName);
+        
+        doc.setFont("times", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+        
+        if (billToTextWidth > maxWidth) {
+          let remainingName = partyName;
+          let lines = [];
+          
+          while (remainingName.length > 0) {
+            let line = "";
+            for (let i = 0; i < remainingName.length; i++) {
+              const testLine = line + remainingName[i];
+              if (doc.getTextWidth(testLine) <= maxWidth) {
+                line = testLine;
+              } else {
+                break;
+              }
+            }
+            lines.push(line);
+            remainingName = remainingName.substring(line.length);
+          }
+          
+          for (let i = 0; i < lines.length; i++) {
+            doc.text(lines[i], pageWidth / 2, yPos, { align: "center" });
+            yPos += 6;
+          }
+          yPos += 2;
+        } else {
+          doc.text(partyName, pageWidth / 2, yPos, { align: "center" });
+          yPos += 8;
+        }
+        
+        // Draw the main box
+        const boxHeight = 38;
+        doc.rect(leftMargin, yPos, contentWidth, boxHeight);
+        
+        // Split exactly in the middle
+        const midPoint = leftMargin + (contentWidth / 2);
+        doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
+
+        // LEFT SIDE CONTENT
+        const leftLabelX = leftMargin + 5;
+        const leftValueX = leftMargin + 38;
+        const leftMaxWidth = midPoint - leftValueX - 3;
+        
+        doc.setFont("times", "bold");
+        doc.setFontSize(9);
+        
+        doc.text("Date", leftLabelX, yPos + 6);
+        doc.text(":", leftLabelX + 18, yPos + 6);
+        doc.setFont("times", "normal");
+        doc.text(`${packingData.dispatchDate || packingData.billDate || new Date().toLocaleDateString()}`, leftValueX, yPos + 6);
+        
+        doc.setFont("times", "bold");
+        doc.text("Order Ref", leftLabelX, yPos + 12);
+        doc.text(":", leftLabelX + 18, yPos + 12);
+        doc.setFont("times", "normal");
+        let orderRef = `${packingData.orderNo || packingData.orderReference || 'N/A'}`;
+        if (doc.getTextWidth(orderRef) > leftMaxWidth) {
+          orderRef = orderRef.substring(0, 20) + "...";
+        }
+        doc.text(orderRef, leftValueX, yPos + 12);
+        
+        doc.setFont("times", "bold");
+        doc.text("Doc No", leftLabelX, yPos + 18);
+        doc.text(":", leftLabelX + 18, yPos + 18);
+        doc.setFont("times", "normal");
+        doc.text(`${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || 'N/A'}`, leftValueX, yPos + 18);
+        
+        doc.setFont("times", "bold");
+        doc.text("Generated By", leftLabelX, yPos + 24);
+        doc.text(":", leftLabelX + 18, yPos + 24);
+        doc.setFont("times", "normal");
+        const preparedByText = `${packingData.preparedBy || preparedBy}`;
+        const preparedByRole = `${packingData.preparedByRole || userRole}`;
+        const fullPreparedText = `${preparedByText} (${preparedByRole})`;
+        
+        if (doc.getTextWidth(fullPreparedText) > leftMaxWidth) {
+          doc.text(preparedByText, leftValueX, yPos + 24);
+          doc.text(`(${preparedByRole})`, leftValueX, yPos + 30);
+        } else {
+          doc.text(fullPreparedText, leftValueX, yPos + 24);
+        }
+        
+        doc.setFont("times", "bold");
+        doc.text("Packing Materials", leftLabelX, yPos + 32);
+        doc.text(":", leftLabelX + 18, yPos + 32);
+        doc.setFont("times", "normal");
+        
+        const packingMaterials = packingData.packingMaterials || { totalBoxes: 0, totalBags: 0, totalPolybags: 0 };
+        const materialParts = [];
+        
+        if (packingMaterials.totalBoxes > 0) {
+          materialParts.push(`${packingMaterials.totalBoxes} Box${packingMaterials.totalBoxes !== 1 ? 'es' : ''}`);
+        }
+        if (packingMaterials.totalBags > 0) {
+          materialParts.push(`${packingMaterials.totalBags} Bag${packingMaterials.totalBags !== 1 ? 's' : ''}`);
+        }
+        if (packingMaterials.totalPolybags > 0) {
+          materialParts.push(`${packingMaterials.totalPolybags} Polybag${packingMaterials.totalPolybags !== 1 ? 's' : ''}`);
+        }
+        
+        const materialsText = materialParts.length > 0 ? materialParts.join(', ') : 'None';
+        
+        if (doc.getTextWidth(materialsText) > leftMaxWidth) {
+          let remainingText = materialsText;
+          let currentY = yPos + 32;
+          while (remainingText.length > 0) {
+            let line = "";
+            for (let i = 0; i < remainingText.length; i++) {
+              const testLine = line + remainingText[i];
+              if (doc.getTextWidth(testLine) <= leftMaxWidth) {
+                line = testLine;
+              } else {
+                break;
+              }
+            }
+            doc.text(line, leftValueX, currentY);
+            remainingText = remainingText.substring(line.length);
+            currentY += 5;
+          }
+        } else {
+          doc.text(materialsText, leftValueX, yPos + 32);
+        }
+
+        // RIGHT SIDE CONTENT
+        const rightLabelX = midPoint + 5;
+        const rightValueX = midPoint + 35;
+        
+        doc.setFont("times", "bold");
+        doc.setFontSize(9);
+        
+        doc.text("Total Lots", rightLabelX, yPos + 6);
+        doc.text(":", rightLabelX + 18, yPos + 6);
+        doc.setFont("times", "normal");
+        doc.text(uniqueLots.toString(), rightValueX, yPos + 6);
+        
+        doc.setFont("times", "bold");
+        doc.text("Total Items", rightLabelX, yPos + 12);
+        doc.text(":", rightLabelX + 18, yPos + 12);
+        doc.setFont("times", "normal");
+        doc.text(totalItems.toString(), rightValueX, yPos + 12);
+        
+        doc.setFont("times", "bold");
+        doc.text("Total Qty", rightLabelX, yPos + 18);
+        doc.text(":", rightLabelX + 18, yPos + 18);
+        doc.setFont("times", "normal");
+        doc.text(`${totalQuantity} PCS`, rightValueX, yPos + 18);
+        
+        doc.setFont("times", "bold");
+        doc.text("Total Sets", rightLabelX, yPos + 24);
+        doc.text(":", rightLabelX + 18, yPos + 24);
+        doc.setFont("times", "normal");
+        doc.text(totalSets.toString(), rightValueX, yPos + 24);
+        
+        doc.setFont("times", "bold");
+        doc.text("Total Value", rightLabelX, yPos + 32);
+        doc.text(":", rightLabelX + 18, yPos + 32);
+        doc.setFont("times", "normal");
+        doc.text("To be calculated", rightValueX, yPos + 32);
+
+        return yPos + boxHeight + 5;
+      };
+
+      const drawTableHeader = (yPos, docType) => {
+        let tableColumns;
+        
+        if (docType.name === "Account") {
+          tableColumns = [
+            { header: "S.No", width: 10 },
+            { header: "Lot Number", width: 20 },
+            { header: "Brand", width: 25 },
+            { header: "Description", width: 45 },
+            { header: "Sets", width: 17 },
+            { header: "Pc/Set", width: 17 },
+            { header: "Loose Pc", width: 17 },
+            { header: "Total Qty", width: 20 },
+            { header: "✓", width: 8 }
+          ];
+        } else {
+          tableColumns = [
+            { header: "S.No", width: 10 },
+            { header: "Lot Number", width: 20 },
+            { header: "Brand", width: 25 },
+            { header: "Description", width: 50 },
+            { header: "Sets", width: 17 },
+            { header: "Pc/Set", width: 17 },
+            { header: "Loose Pc", width: 17 },
+            { header: "Total Qty", width: 23 }
+          ];
+        }
+
+        doc.setFont("times", "bold");
+        doc.setFillColor(240, 240, 240);
+        doc.rect(leftMargin, yPos, contentWidth, 10, 'F');
+        doc.rect(leftMargin, yPos, contentWidth, 10);
+        
+        let currentX = leftMargin;
+        tableColumns.forEach(col => {
+          const textWidth = doc.getTextWidth(col.header);
+          const textX = currentX + (col.width / 2) - (textWidth / 2);
+          doc.text(col.header, textX, yPos + 7);
+          currentX += col.width;
+          if (currentX < pageWidth - rightMargin) {
+            doc.line(currentX, yPos, currentX, yPos + 10);
+          }
+        });
+        
+        return yPos + 10;
+      };
+
+      const drawCheckbox = (x, y, size = 3) => {
+        doc.rect(x, y, size, size);
+      };
+
+      const drawTableRow = (item, index, yPos, docType) => {
+        let tableColumns;
+        
+        if (docType.name === "Account") {
+          tableColumns = [
+            { width: 10 }, { width: 20 }, { width: 25 }, { width: 45 },
+            { width: 17 }, { width: 17 }, { width: 17 }, { width: 20 }, { width: 8 }
+          ];
+        } else {
+          tableColumns = [
+            { width: 10 }, { width: 20 }, { width: 25 }, { width: 50 },
+            { width: 17 }, { width: 17 }, { width: 17 }, { width: 23 }
+          ];
+        }
+        
+        const rowHeight = 10;
+
+        doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+        
+        let colX = leftMargin;
+        tableColumns.forEach(col => {
+          colX += col.width;
+          if (colX < pageWidth - rightMargin) {
+            doc.line(colX, yPos, colX, yPos + rowHeight);
+          }
+        });
+
+        let values;
+        if (docType.name === "Account") {
+          values = [
+            (index + 1).toString(),
+            item.lotNumber || "",
+            item.brand || "",
+            (() => {
+              let description = item.description || "";
+              const maxChars = 27;
+              if (description.length > maxChars) {
+                description = description.substring(0, maxChars - 3) + "...";
+              }
+              return description;
+            })(),
+            (item.sets || 0).toString(),
+            (item.setsPerPcs || 0).toString(),
+            (item.loosePcs || 0).toString(),
+            (item.quantity || 0).toString(),
+            ""
+          ];
+        } else {
+          values = [
+            (index + 1).toString(),
+            item.lotNumber || "",
+            item.brand || "",
+            (() => {
+              let description = item.description || "";
+              const maxChars = 35;
+              if (description.length > maxChars) {
+                description = description.substring(0, maxChars - 3) + "...";
+              }
+              return description;
+            })(),
+            (item.sets || 0).toString(),
+            (item.setsPerPcs || 0).toString(),
+            (item.loosePcs || 0).toString(),
+            (item.quantity || 0).toString()
+          ];
+        }
+
+        let textX = leftMargin;
+        values.forEach((value, colIndex) => {
+          const textWidth = doc.getTextWidth(value);
+          const textXPos = textX + (tableColumns[colIndex].width / 2) - (textWidth / 2);
+          
+          if (colIndex === tableColumns.length - 1 && docType.name === "Account") {
+            const checkboxX = textX + (tableColumns[colIndex].width / 2) - 2;
+            const checkboxY = yPos + (rowHeight / 2) - 2;
+            drawCheckbox(checkboxX, checkboxY, 4);
+          } else {
+            doc.text(value, textXPos, yPos + 8);
+          }
+          
+          textX += tableColumns[colIndex].width;
+        });
+
+        return rowHeight;
+      };
+
+      const drawTableFooter = (yPos, isLastPage, docType) => {
+        yPos += 5;
+        
+        doc.setLineWidth(0.5);
+        doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
+        
+        if (isLastPage && docType.name === "Account") {
+          doc.setFontSize(8);
+          doc.setTextColor(100, 100, 100);
+          doc.text("□ - Checkbox for item verification", leftMargin + 5, yPos + 6);
+          doc.setTextColor(0, 0, 0);
+        }
+        
+        return yPos + 15;
+      };
+
+      const drawSignatures = (docType, yPos) => {
+        const footerY = pageHeight - 20;
+        doc.setFont("times", "bold");
+        doc.setFontSize(9);
+        
+        doc.setLineWidth(0.3);
+        
+        const sectionWidth = (contentWidth - 20) / 4;
+        let currentX = leftMargin;
+        
+        doc.text("Prepared By", currentX + 5, footerY);
+        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+        doc.setFontSize(7);
+        doc.text(`${packingData.preparedBy || preparedBy} (${packingData.preparedByRole || userRole})`, currentX + 5, footerY + 8);
+        
+        currentX += sectionWidth;
+        doc.setFontSize(9);
+        doc.text("Account Officer", currentX + 5, footerY);
+        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+        doc.setFontSize(7);
+        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+        
+        currentX += sectionWidth;
+        doc.setFontSize(9);
+        doc.text("Checked By", currentX + 5, footerY);
+        doc.line(currentX + 5, footerY + 3, currentX + sectionWidth - 5, footerY + 3);
+        doc.setFontSize(7);
+        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+        
+        currentX += sectionWidth;
+        doc.setFontSize(9);
+        doc.text("Authorized Signatory", currentX + 5, footerY);
+        doc.line(currentX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
+        doc.setFontSize(7);
+        doc.text("(Name & Signature)", currentX + 5, footerY + 8);
+        
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.text("Company Seal/Stamp", pageWidth / 2 - 15, footerY - 8);
+        doc.setTextColor(0, 0, 0);
+        
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        if (docType.name === "Account") {
+          doc.text("For accounting purposes only - Please verify each item", pageWidth / 2, footerY - 15, { align: "center" });
+        } else if (docType.name === "Audit") {
+          doc.text("Audit reference document", pageWidth / 2, footerY - 15, { align: "center" });
+        } else if (docType.name === "Customer") {
+          doc.text("Customer copy - Please retain for your records", pageWidth / 2, footerY - 15, { align: "center" });
+        }
+        doc.setTextColor(0, 0, 0);
+      };
+
+      for (let docIndex = 0; docIndex < documentTypes.length; docIndex++) {
+        const docType = documentTypes[docIndex];
+        let itemsProcessed = 0;
+        let sectionPageCount = 0;
+        
+        while (itemsProcessed < packingData.items.length) {
+          const remainingRows = packingData.items.length - itemsProcessed;
+          const rowsOnThisPage = Math.min(MAX_ROWS_PER_PAGE, remainingRows);
+          const isLastPageOfSection = (itemsProcessed + rowsOnThisPage) === packingData.items.length;
+          
+          let yPos = 15;
+          
+          if (sectionPageCount > 0) {
+            doc.addPage();
+          } else if (docIndex > 0 && sectionPageCount === 0) {
+            doc.addPage();
+          }
+          
+          drawPageBorder();
+          yPos = drawHeader(docType, yPos);
+          yPos = drawTableHeader(yPos, docType);
+          
+          for (let i = 0; i < rowsOnThisPage; i++) {
+            const item = packingData.items[itemsProcessed];
+            const rowHeight = drawTableRow(item, itemsProcessed, yPos, docType);
+            yPos += rowHeight;
+            itemsProcessed++;
+          }
+          
+          yPos = drawTableFooter(yPos, isLastPageOfSection, docType);
+          
+          if (isLastPageOfSection) {
+            drawSignatures(docType, yPos);
+          } else {
+            yPos += 5;
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text("... continued on next page", pageWidth / 2, yPos, { align: "center" });
+            doc.setTextColor(0, 0, 0);
+          }
+          
+          sectionPageCount++;
+        }
+      }
+
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(
+          `Page ${i} of ${pageCount}`,
+          pageWidth / 2,
+          pageHeight - 8,
+          { align: "center" }
+        );
+        doc.setTextColor(0, 0, 0);
+      }
+
+      const fileName = `PackingList_${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || packingData.orderNo}_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+      
+      return true;
+
+    } catch (error) {
+      console.error("PDF Generation Error:", error);
+      return false;
+    }
   };
 
   // Filter drafts (use latest versions from localEditedDrafts)
@@ -1695,152 +1672,152 @@ const generatePackingListPDF = async (packingData) => {
 
   const uniqueParties = [...new Set(getDisplayDrafts().map(draft => draft.partyName).filter(Boolean))];
 
-const renderDraftDetails = (draft) => {
-  if (!draft) return (
-    <div className="no-draft-selected">
-      <div className="no-selection-icon">📄</div>
-      <h3>No Draft Selected</h3>
-      <p>Select a draft from the left panel to view complete details</p>
-    </div>
-  );
-
-  // Get the latest version of the draft
-  const currentDraft = getCurrentDraft(draft.id);
-  
-  // RECALCULATE total from items array - IGNORE the stored totalItems
-  const correctTotal = currentDraft.items?.reduce((sum, item) => {
-    const qty = parseInt(item.quantity) || 0;
-    return sum + qty;
-  }, 0) || 0;
-
-  return (
-    <div className="complete-draft-details">
-      <div className="details-header">
-        <h2>📄 Draft Bill Information</h2>
-        {localEditedDrafts[draft.id] && (
-          <div className="edited-badge">⚠️ Locally Edited (Not saved to Sheet)</div>
-        )}
-        <div className="details-actions">
-          <button onClick={() => handleEditDraft(currentDraft)} className="edit-details-button">
-            ✏️ Edit Draft
-          </button>
-          <button onClick={() => handleConvertToFinal(currentDraft)} className="convert-details-button">
-            🚚 Convert to Final Bill
-          </button>
-          <button onClick={() => handleDeleteDraft(currentDraft.id)} className="delete-details-button">
-            🗑️ Delete
-          </button>
-        </div>
+  const renderDraftDetails = (draft) => {
+    if (!draft) return (
+      <div className="no-draft-selected">
+        <div className="no-selection-icon">📄</div>
+        <h3>No Draft Selected</h3>
+        <p>Select a draft from the left panel to view complete details</p>
       </div>
-      
-      <div className="details-body">
-        <div className="detail-section bill-header">
-          <div className="bill-title">
-            <h3>PACKING LIST / BILL DETAILS</h3>
-            <p className="bill-number">Draft No: <strong>{currentDraft.draftNumber || currentDraft.orderNo}</strong></p>
-          </div>
-          <div className="bill-dates">
-            <p><strong>Created:</strong> {new Date(currentDraft.createdDate).toLocaleString()}</p>
-            <p><strong>Last Modified:</strong> {new Date(currentDraft.lastModified).toLocaleString()}</p>
+    );
+
+    // Get the latest version of the draft
+    const currentDraft = getCurrentDraft(draft.id);
+    
+    // RECALCULATE total from items array
+    const correctTotal = currentDraft.items?.reduce((sum, item) => {
+      const qty = parseInt(item.quantity) || 0;
+      return sum + qty;
+    }, 0) || 0;
+
+    return (
+      <div className="complete-draft-details">
+        <div className="details-header">
+          <h2>📄 Draft Bill Information</h2>
+          {localEditedDrafts[draft.id] && (
+            <div className="edited-badge">⚠️ Locally Edited (Not saved to Sheet)</div>
+          )}
+          <div className="details-actions">
+            <button onClick={() => handleEditDraft(currentDraft)} className="edit-details-button">
+              ✏️ Edit Draft
+            </button>
+            <button onClick={() => handleConvertToFinal(currentDraft)} className="convert-details-button">
+              🚚 Convert to Final Bill
+            </button>
+            <button onClick={() => handleDeleteDraft(currentDraft.id)} className="delete-details-button">
+              🗑️ Delete
+            </button>
           </div>
         </div>
-
-        <div className="detail-section party-info-section">
-          <div className="section-header-with-icon">
-            <span className="section-icon">🏢</span>
-            <h4>Party Information</h4>
-          </div>
-          <div className="party-details-card">
-            <div className="party-info-grid">
-              <div className="party-info-item">
-                <label>Party Name:</label>
-                <span className="party-name-value">{currentDraft.partyName}</span>
-              </div>
-              <div className="party-info-item">
-                <label>Order Number:</label>
-                <span>{currentDraft.orderNo || 'N/A'}</span>
-              </div>
-              <div className="party-info-item full-width">
-                <label>Delivery Address:</label>
-                <div className="address-value">{currentDraft.deliveryAddress || 'N/A'}</div>
-              </div>
-              {currentDraft.notes && (
-                <div className="party-info-item full-width">
-                  <label>Contact Details:</label>
-                  <div className="notes-value">{currentDraft.notes}</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="detail-section">
-          <div className="section-header-with-icon">
-            <span className="section-icon">📦</span>
-            <h4>Items Details</h4>
-          </div>
-          <table className="items-table">
-            <thead>
-              <tr>
-                <th>S.No</th>
-                <th>Lot Number</th>
-                <th>Item Name</th>
-                <th>Description</th>
-                <th>Brand</th>
-                <th>Sets</th>
-                <th>Pcs/Set</th>
-                <th>Loose Pcs</th>
-                <th>Total Qty</th>
-               </tr>
-            </thead>
-            <tbody>
-              {currentDraft.items && currentDraft.items.length > 0 ? (
-                currentDraft.items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td>{idx + 1}</td>
-                    <td><strong>{item.lotNumber || '-'}</strong></td>
-                    <td>{item.name || 'N/A'}</td>
-                    <td>{item.description || '-'}</td>
-                    <td><strong>{item.brand || '-'}</strong></td>
-                    <td>{item.sets || 0}</td>
-                    <td>{item.setsPerPcs || 0}</td>
-                    <td>{item.loosePcs || 0}</td>
-                    <td><strong>{item.quantity || 0}</strong></td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="9" style={{textAlign: 'center'}}>No items found</td>
-                </tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr className="total-row">
-                <td colSpan="8" style={{textAlign: 'right', fontWeight: 'bold'}}>Total Quantity:</td>
-                <td style={{fontWeight: 'bold', backgroundColor: '#f0f0f0'}}>{correctTotal}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-
-        {currentDraft.priority && (
-          <div className="detail-section">
-            <div className="priority-badge" style={{ backgroundColor: getPriorityColor(currentDraft.priority) }}>
-              Priority: {currentDraft.priority.toUpperCase()}
-            </div>
-          </div>
-        )}
         
-        <div className="detail-section">
-          <div className="prepared-by-info">
-            <label>Prepared By:</label>
-            <span>{currentDraft.preparedBy || 'System'} ({currentDraft.preparedByRole || 'User'})</span>
+        <div className="details-body">
+          <div className="detail-section bill-header">
+            <div className="bill-title">
+              <h3>PACKING LIST / BILL DETAILS</h3>
+              <p className="bill-number">Draft No: <strong>{currentDraft.draftNumber || currentDraft.orderNo}</strong></p>
+            </div>
+            <div className="bill-dates">
+              <p><strong>Created:</strong> {new Date(currentDraft.createdDate).toLocaleString()}</p>
+              <p><strong>Last Modified:</strong> {new Date(currentDraft.lastModified).toLocaleString()}</p>
+            </div>
+          </div>
+
+          <div className="detail-section party-info-section">
+            <div className="section-header-with-icon">
+              <span className="section-icon">🏢</span>
+              <h4>Party Information</h4>
+            </div>
+            <div className="party-details-card">
+              <div className="party-info-grid">
+                <div className="party-info-item">
+                  <label>Party Name:</label>
+                  <span className="party-name-value">{currentDraft.partyName}</span>
+                </div>
+                <div className="party-info-item">
+                  <label>Order Number:</label>
+                  <span>{currentDraft.orderNo || 'N/A'}</span>
+                </div>
+                <div className="party-info-item full-width">
+                  <label>Delivery Address:</label>
+                  <div className="address-value">{currentDraft.deliveryAddress || 'N/A'}</div>
+                </div>
+                {currentDraft.notes && (
+                  <div className="party-info-item full-width">
+                    <label>Contact Details:</label>
+                    <div className="notes-value">{currentDraft.notes}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="detail-section">
+            <div className="section-header-with-icon">
+              <span className="section-icon">📦</span>
+              <h4>Items Details</h4>
+            </div>
+            <table className="items-table">
+              <thead>
+                <tr>
+                  <th>S.No</th>
+                  <th>Lot Number</th>
+                  <th>Item Name</th>
+                  <th>Description</th>
+                  <th>Brand</th>
+                  <th>Sets</th>
+                  <th>Pcs/Set</th>
+                  <th>Loose Pcs</th>
+                  <th>Total Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentDraft.items && currentDraft.items.length > 0 ? (
+                  currentDraft.items.map((item, idx) => (
+                    <tr key={idx}>
+                      <td>{idx + 1}</td>
+                      <td><strong>{item.lotNumber || '-'}</strong></td>
+                      <td>{item.name || 'N/A'}</td>
+                      <td>{item.description || '-'}</td>
+                      <td><strong>{item.brand || '-'}</strong></td>
+                      <td>{item.sets || 0}</td>
+                      <td>{item.setsPerPcs || 0}</td>
+                      <td>{item.loosePcs || 0}</td>
+                      <td><strong>{item.quantity || 0}</strong></td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="9" style={{textAlign: 'center'}}>No items found</td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="total-row">
+                  <td colSpan="8" style={{textAlign: 'right', fontWeight: 'bold'}}>Total Quantity:</td>
+                  <td style={{fontWeight: 'bold', backgroundColor: '#f0f0f0'}}>{correctTotal}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {currentDraft.priority && (
+            <div className="detail-section">
+              <div className="priority-badge" style={{ backgroundColor: getPriorityColor(currentDraft.priority) }}>
+                Priority: {currentDraft.priority.toUpperCase()}
+              </div>
+            </div>
+          )}
+          
+          <div className="detail-section">
+            <div className="prepared-by-info">
+              <label>Prepared By:</label>
+              <span>{currentDraft.preparedBy || 'System'} ({currentDraft.preparedByRole || 'User'})</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
   const renderForm = () => (
     <div className="draft-form-fullscreen">
@@ -2178,8 +2155,8 @@ const renderDraftDetails = (draft) => {
         </div>
       )}
 
-      {/* Packing Materials Modal */}
-      {isPackingMaterialsModalOpen && <PackingMaterialsModal />}
+      {/* Confirmation Modal */}
+      {showConfirmModal && <ConfirmConversionModal />}
 
       {/* User Info Bar */}
       <div className="user-info-bar">
@@ -2495,8 +2472,8 @@ const renderDraftDetails = (draft) => {
           overflow: auto;
           box-shadow: 0 4px 20px rgba(0,0,0,0.2);
         }
-        .modal-medium {
-          max-width: 500px;
+        .modal-confirm {
+          max-width: 550px;
         }
         .modal-header {
           display: flex;
@@ -2519,13 +2496,6 @@ const renderDraftDetails = (draft) => {
           margin: 0;
           font-size: 18px;
         }
-        .modal-badge {
-          background: #e3f2fd;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 11px;
-          color: #1976d2;
-        }
         .modal-close {
           background: none;
           border: none;
@@ -2539,43 +2509,64 @@ const renderDraftDetails = (draft) => {
         .modal-body {
           padding: 20px;
         }
-        .info-message {
-          background: #e8f0fe;
+        .warning-message {
+          background: #fff3e0;
           padding: 12px;
           border-radius: 8px;
           margin-bottom: 20px;
           display: flex;
           gap: 10px;
           font-size: 13px;
+          border-left: 4px solid #ff9800;
         }
-        .form-field {
-          margin-bottom: 16px;
-        }
-        .form-field label {
-          display: block;
-          margin-bottom: 6px;
-          font-weight: 500;
-          font-size: 14px;
-        }
-        .form-input {
-          width: 100%;
-          padding: 10px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-        }
-        .summary-box {
-          margin-top: 20px;
-          padding: 15px;
-          background-color: #f8f9fa;
+        .draft-summary {
+          background: #f8f9fa;
           border-radius: 8px;
+          padding: 15px;
+          margin-bottom: 20px;
           border: 1px solid #dee2e6;
+        }
+        .summary-title {
+          font-weight: bold;
+          margin-bottom: 12px;
+          font-size: 14px;
+          color: #495057;
+        }
+        .summary-details {
+          display: grid;
+          gap: 8px;
         }
         .summary-row {
           display: flex;
           justify-content: space-between;
           font-size: 14px;
-          margin-top: 5px;
+          padding: 4px 0;
+          border-bottom: 1px solid #e9ecef;
+        }
+        .summary-row:last-child {
+          border-bottom: none;
+        }
+        .info-box {
+          background: #e3f2fd;
+          border-radius: 8px;
+          padding: 12px;
+          display: flex;
+          gap: 12px;
+          margin-top: 15px;
+        }
+        .info-icon {
+          font-size: 20px;
+        }
+        .info-text {
+          flex: 1;
+          font-size: 13px;
+        }
+        .info-text ul {
+          margin: 8px 0 0 0;
+          padding-left: 20px;
+        }
+        .info-text li {
+          margin: 4px 0;
         }
         .modal-footer {
           padding: 16px 20px;
@@ -2599,9 +2590,11 @@ const renderDraftDetails = (draft) => {
           border-radius: 6px;
           cursor: pointer;
         }
-        .btn-large {
-          padding: 10px 24px;
-          font-size: 14px;
+        .btn-danger {
+          background: #ff9800;
+        }
+        .btn-danger:hover {
+          background: #f57c00;
         }
       `}</style>
     </div>
