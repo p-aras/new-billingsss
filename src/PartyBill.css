@@ -825,6 +825,37 @@ body {
   cursor: pointer;
   transition: all 0.2s ease;
 }
+/* Disabled button styles */
+.blue-modal-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.blue-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.blue-btn:disabled:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Processing indicator animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.blue-modal-footer .blue-btn-secondary:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
+}
 
 .blue-sidebar-suggestion-item:hover {
   background: #f8fafc;

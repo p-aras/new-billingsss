@@ -289,9 +289,9 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
 const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
   try {
     const billNumbers = selectedBills.map(bill => bill['Bill Number']);
-    const scriptURL = 'https://script.google.com/macros/s/AKfycbzm1NR6oJ-2Q7f3NU1Zbk4koVdgsrsljyfZ5KOv4U426FoByD_fIH6sQZqz_OVATYco/exec';
     
-    // Prepare complete gatepass data to send
+    const scriptURL = 'https://script.google.com/macros/s/AKfycbxL5iwsTonjFTHTsy1VO0VO-KWTOM9n6eDrfztclMIjb8mPZc2TBsJD1AHcueZOv0LN/exec';
+    
     const gatepassDataToSend = {
       selectedBills: selectedBills,
       driverName: gatepassData.driverName,
@@ -301,7 +301,8 @@ const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
       consolidatedRemarks: gatepassData.consolidatedRemarks,
       totalPetti: gatepassData.totalPetti,
       totalBora: gatepassData.totalBora,
-      totalPolybags: gatepassData.totalPolybags
+      totalPolybags: gatepassData.totalPolybags,
+      gatepassNumber: gatepassNumber
     };
     
     const updateData = {
@@ -329,45 +330,8 @@ const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
     return result.success;
     
   } catch (error) {
-    console.error('Error updating bills with gatepass info:', error);
-    
-    // Fallback with no-cors mode
-    try {
-      const fallbackData = {
-        action: 'updateGatepass',
-        billNumbers: selectedBills.map(bill => bill['Bill Number']),
-        gatepassNumber: gatepassNumber,
-        gatepassData: {
-          selectedBills: selectedBills,
-          driverName: gatepassData.driverName,
-          driverContact: gatepassData.driverContact,
-          vehicleNumber: gatepassData.vehicleNumber,
-          purpose: gatepassData.purpose,
-          consolidatedRemarks: gatepassData.consolidatedRemarks,
-          totalPetti: gatepassData.totalPetti,
-          totalBora: gatepassData.totalBora,
-          totalPolybags: gatepassData.totalPolybags
-        }
-      };
-      
-      const encodedData = encodeURIComponent(JSON.stringify(fallbackData));
-      const postData = `data=${encodedData}`;
-      const fallbackURL = 'https://script.google.com/macros/s/AKfycbzm1NR6oJ-2Q7f3NU1Zbk4koVdgsrsljyfZ5KOv4U426FoByD_fIH6sQZqz_OVATYco/exec';
-      
-      await fetch(fallbackURL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: postData
-      });
-      
-      return true;
-    } catch (fallbackError) {
-      console.error('Fallback also failed:', fallbackError);
-      return false;
-    }
+    console.error('Error updating bills:', error);
+    return false;
   }
 };
 

@@ -48,6 +48,7 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
   const [showLotSuggestions, setShowLotSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const suggestionsRef = useRef(null);
+  const [isProcessingDraft, setIsProcessingDraft] = useState(false);
   
   // Lot Details Modal state
   const [isLotDetailsModalOpen, setIsLotDetailsModalOpen] = useState(false);
@@ -416,6 +417,10 @@ const saveBillToGoogleSheet = async (billData) => {
       body: urlEncodedData
     });
     
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
     const result = await response.json();
     
     if (result.success) {
@@ -424,17 +429,18 @@ const saveBillToGoogleSheet = async (billData) => {
       await fetchLotSummary();
       return true;
     } else {
-      throw new Error(result.error);
+      throw new Error(result.error || 'Unknown error from server');
     }
     
   } catch (error) {
     console.error("Error saving to Google Sheets:", error);
     addDebugMessage(`❌ Failed to save: ${error.message}`, 'error');
-    showToast("Failed to save to Google Sheets", "error");
+    showToast(`Failed to save to Google Sheets: ${error.message}`, "error");
     return false;
   } finally {
-    setSavingToSheet(false);
-    if (processingStage === 'sheet') setProcessingStage(null);
+    // Don't clear here - let the calling function handle it
+    // setSavingToSheet(false);
+    // setProcessingStage(null);
   }
 };
 // NEW FUNCTION: Save bill as draft
@@ -550,47 +556,42 @@ const DraftSavingOverlay = () => {
     </div>
   );
 };
-// NEW FUNCTION: Handle final action selection
-// NEW FUNCTION: Handle final action selection
+// Update handleFinalAction to pass data as parameter
 const handleFinalAction = (action) => {
-  setIsConfirmModalOpen(false);
-  
-  if (action === 'final') {
-    // Direct final submission without packing materials
+  if (action === 'draft') {
+    // Pass billForm directly instead of using state
+    handleSaveAsDraft({ ...billForm });
+  } else if (action === 'final') {
+    setIsConfirmModalOpen(false);
     handleFinalSubmission();
-  } else if (action === 'draft') {
-    setTempBillDataForDraft({ ...billForm });
-    handleSaveAsDraft();
   }
 };
 
-const handleSaveAsDraft = async () => {
-  if (!tempBillDataForDraft) {
+// Update handleSaveAsDraft to accept data parameter
+const handleSaveAsDraft = async (billData) => {
+  if (!billData) {
     showToast("No draft data to save", "error");
     return;
   }
   
-  // Show loading immediately
+  setIsProcessingDraft(true);
   setSavingToSheet(true);
   setProcessingStage('sheet');
   
   addDebugMessage(`Starting draft save process...`, 'info');
   
   try {
-    // Get the next sequential draft number
-    addDebugMessage(`Getting next draft number...`, 'info');
     const draftNumber = await getNextDraftNumber();
-    
     addDebugMessage(`Creating draft with number: ${draftNumber}`, 'info');
     
     const draftData = {
       billNumber: draftNumber,
       packingNumber: draftNumber,
-      partyName: selectedPartyState?.name || tempBillDataForDraft.partyName,
-      billDate: tempBillDataForDraft.billDate,
-      dueDate: tempBillDataForDraft.dueDate || "",
-      orderReference: tempBillDataForDraft.orderReference || "",
-      items: tempBillDataForDraft.items.map(item => ({
+      partyName: selectedPartyState?.name || billData.partyName,
+      billDate: billData.billDate,
+      dueDate: billData.dueDate || "",
+      orderReference: billData.orderReference || "",
+      items: billData.items.map(item => ({
         id: item.id,
         barcode: item.barcode,
         lotNumber: item.lotNumber,
@@ -604,7 +605,7 @@ const handleSaveAsDraft = async () => {
         colors: item.colors || [],
         sizes: item.sizes || []
       })),
-      notes: tempBillDataForDraft.notes || "",
+      notes: billData.notes || "",
       createdDate: new Date().toISOString(),
       preparedBy: preparedBy,
       preparedByRole: userRole,
@@ -613,7 +614,7 @@ const handleSaveAsDraft = async () => {
       documentType: 'DRAFT'
     };
     
-    // FIRST: Generate DRAFT PDF
+    // Generate DRAFT PDF
     addDebugMessage(`Generating DRAFT PDF...`, 'info');
     const pdfGenerated = await generateDraftPDF(draftData);
     
@@ -621,7 +622,7 @@ const handleSaveAsDraft = async () => {
       throw new Error('Failed to generate DRAFT PDF');
     }
     
-    // SECOND: Save to Google Sheets
+    // Save to Google Sheets
     addDebugMessage(`Saving draft data to sheet...`, 'info');
     const saved = await saveBillToDraftSheet(draftData);
     
@@ -652,6 +653,7 @@ const handleSaveAsDraft = async () => {
       });
       
       setTempBillDataForDraft(null);
+      setTempBillData(null);
       setIsEditingExistingDraft(false);
       setExistingDraftNumber(null);
       
@@ -660,8 +662,9 @@ const handleSaveAsDraft = async () => {
       if (barcodeInputRef.current) barcodeInputRef.current.focus();
       await fetchLotSummary();
       
-      // Close the confirmation modal
+      // Close the confirmation modal AFTER successful save
       setIsConfirmModalOpen(false);
+      
     } else {
       throw new Error('Save operation returned false');
     }
@@ -671,11 +674,9 @@ const handleSaveAsDraft = async () => {
     addDebugMessage(`❌ Draft save failed: ${error.message}`, 'error');
     showToast(`Failed to save draft: ${error.message}`, "error");
   } finally {
-    // Clear loading states
-    setTimeout(() => {
-      setSavingToSheet(false);
-      setProcessingStage(null);
-    }, 1000);
+    setSavingToSheet(false);
+    setProcessingStage(null);
+    setIsProcessingDraft(false);
   }
 };
 const generateDraftPDF = async (draftData) => {
@@ -2460,19 +2461,25 @@ const getParentLotNumber = (lotNumber) => {
     setIsConfirmModalOpen(true);
   };
 
-  const handleFinalSubmit = async () => {
-    setIsConfirmModalOpen(false);
-    
-    const packingNumber = await getNextPackingNumber();
+ const handleFinalSubmit = async () => {
+  if (!tempBillData) return;
+  
+  // Show loading (don't set timeout to auto-clear)
+  setGeneratingPDF(true);
+  setProcessingStage('pdf');
+  
+  try {
+    // Use 'PL' prefix for Final Bills (Packing List)
+    const packingNumber = await getNextPackingNumber('PL');
     
     const packingDataForStorage = {
       billNumber: packingNumber,
       packingNumber: packingNumber,
-      partyName: selectedPartyState?.name || billForm.partyName,
-      billDate: billForm.billDate,
-      dueDate: billForm.dueDate,
-      orderReference: billForm.orderReference || "",
-      items: billForm.items.map(item => ({
+      partyName: selectedPartyState?.name || tempBillData.partyName,
+      billDate: tempBillData.billDate,
+      dueDate: tempBillData.dueDate,
+      orderReference: tempBillData.orderReference || "",
+      items: tempBillData.items.map(item => ({
         id: item.id,
         barcode: item.barcode,
         lotNumber: item.lotNumber,
@@ -2486,44 +2493,79 @@ const getParentLotNumber = (lotNumber) => {
         colors: item.colors,
         sizes: item.sizes
       })),
-      notes: billForm.notes,
+      notes: tempBillData.notes,
       createdDate: new Date().toISOString(),
       preparedBy: preparedBy,
       preparedByRole: userRole,
-      preparedByEmail: userEmail
+      preparedByEmail: userEmail,
+      status: 'FINAL',
+      documentType: 'FINAL'
     };
+    
+    // Switch to sheet saving stage
+    setProcessingStage('sheet');
     
     const pdfGenerated = await generatePackingList(packingDataForStorage);
     
-    if (pdfGenerated) {
-      await saveBillToGoogleSheet(packingDataForStorage);
-      setShowSuccessAnimation(true);
-      setProcessingStage('complete');
-      setTimeout(() => setShowSuccessAnimation(false), 2000);
-      setTimeout(() => setProcessingStage(null), 2000);
-      
-      if (onSubmit) onSubmit(packingDataForStorage);
-      
-      setBillForm({
-        partyName: selectedParty?.name || "",
-        billDate: new Date().toISOString().split('T')[0],
-        dueDate: "",
-        items: [],
-        notes: ""
-      });
-      if (!selectedParty) setSelectedPartyState(null);
-      setCurrentProduct({
-        barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
-        looseOperation: "add",
-        brand: "", item: "", quantity: 1, totalPieces: "",
-        colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
-      });
-      showToast(`Packing list ${packingNumber} generated!`, 'success');
-      if (barcodeInputRef.current) barcodeInputRef.current.focus();
-      
-      await fetchLotSummary();
+    if (!pdfGenerated) {
+      throw new Error('PDF generation failed');
     }
-  };
+    
+    const saved = await saveBillToGoogleSheet(packingDataForStorage);
+    
+    if (!saved) {
+      throw new Error('Failed to save to Google Sheets');
+    }
+    
+    // Only if everything succeeded
+    setShowSuccessAnimation(true);
+    setProcessingStage('complete');
+    
+    setTimeout(() => {
+      setShowSuccessAnimation(false);
+      setProcessingStage(null);
+      setGeneratingPDF(false);
+    }, 2000);
+    
+    if (onSubmit) onSubmit(packingDataForStorage);
+    
+    // Reset form after final submission
+    setBillForm({
+      partyName: selectedParty?.name || "",
+      billDate: new Date().toISOString().split('T')[0],
+      dueDate: "",
+      items: [],
+      notes: ""
+    });
+    
+    if (!selectedParty) setSelectedPartyState(null);
+    
+    setCurrentProduct({
+      barcode: "", lotNumber: "", sets: "", setsPerPcs: "", loosePcs: 0,
+      looseOperation: "add",
+      brand: "", item: "", quantity: 1, totalPieces: "",
+      colors: [], sizes: [], sizeQuantities: {}, colorDetails: {}
+    });
+    
+    setTempBillData(null);
+    setTempBillDataForDraft(null);
+    
+    showToast(`Packing list ${packingNumber} generated successfully!`, 'success');
+    
+    if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    await fetchLotSummary();
+    
+    setIsConfirmModalOpen(false);
+    
+  } catch (error) {
+    console.error("Error in handleFinalSubmit:", error);
+    addDebugMessage(`❌ Final submission failed: ${error.message}`, 'error');
+    showToast(`Failed to save: ${error.message}`, "error");
+    // Clear loading on error
+    setProcessingStage(null);
+    setGeneratingPDF(false);
+  }
+};
 
   const playBeepSound = () => {
     try {
@@ -2590,12 +2632,12 @@ const generatePackingList = async (packingData) => {
     const drawHeader = (docType, yPos) => {
       // Increased main title font size
       doc.setFont("times", "bold");
-      doc.setFontSize(26); // Increased from 22
+      doc.setFontSize(20); // Increased from 22
       doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
       yPos += 10; // Increased from 8
       
       // Increased subheading font size
-      doc.setFontSize(16); // Increased from 14
+      doc.setFontSize(19); // Increased from 14
       doc.setFont("times", "bold");
       doc.setTextColor(70, 70, 200);
       doc.text(docType.subheading, pageWidth / 2, yPos, { align: "center" });
@@ -3049,8 +3091,13 @@ const generatePackingList = async (packingData) => {
       doc.setTextColor(0, 0, 0);
     }
 
-    const fileName = `PackingList_${packingData.packingNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
+   // Sanitize party name for filename (remove special characters)
+const sanitizedPartyName = packingData.partyName
+  .replace(/[^a-zA-Z0-9]/g, '_')  // Replace special chars with underscore
+  .substring(0, 30);  // Limit length to 30 characters
+
+const fileName = `${sanitizedPartyName}_PackingList_${packingData.packingNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
+doc.save(fileName);
     
     setProcessingStage(null);
     return true;
@@ -3327,217 +3374,231 @@ const EditItemModal = () => {
   );
 };
   // Confirmation Modal Component
-  const ConfirmationModal = () => {
-    if (!tempBillData) return null;
-    
-    const totalQuantity = tempBillData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-    const totalItems = tempBillData.items.length;
-    const totalSets = tempBillData.items.reduce((sum, item) => sum + (item.sets || 0), 0);
-    
-    return (
-    <div className="blue-modal-overlay" onClick={() => setIsConfirmModalOpen(false)}>
-  <div className="blue-modal blue-modal-large" onClick={(e) => e.stopPropagation()}>
-    <div className="blue-modal-header">
-      <div className="blue-modal-header-left">
-        <span className="blue-modal-icon">✅</span>
-        <h3>Confirm Packing List</h3>
-        <span className="blue-modal-badge">Review Before Submission</span>
-      </div>
-      <button className="blue-modal-close" onClick={() => setIsConfirmModalOpen(false)}>✕</button>
-    </div>
-    <div className="blue-modal-body">
-      <div className="blue-user-info-bar" style={{ 
-        backgroundColor: '#e8f0fe', 
-        padding: '10px 15px', 
-        borderRadius: '8px', 
-        marginBottom: '20px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        fontSize: '13px',
-        border: '1px solid #cbd5e1'
-      }}>
-        <span style={{ fontSize: '18px' }}>👤</span>
-        <div>
-          <strong>Prepared by:</strong> {preparedBy}
-          <span style={{ marginLeft: '10px', color: '#666' }}>({userRole})</span>
+const ConfirmationModal = () => {
+  if (!tempBillData) return null;
+  
+  const totalQuantity = tempBillData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+  const totalItems = tempBillData.items.length;
+  
+  // Calculate total sets with support for concatenated formats
+  const calculateSetSum = (setsValue) => {
+    if (!setsValue) return 0;
+    const setsStr = String(setsValue);
+    if (setsStr.includes('+')) {
+      return setsStr.split('+').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
+    } else if (setsStr.length > 2) {
+      const partSize = 2;
+      const parts = [];
+      for (let i = 0; i < setsStr.length; i += partSize) {
+        parts.push(parseInt(setsStr.substr(i, partSize)) || 0);
+      }
+      return parts.reduce((sum, num) => sum + num, 0);
+    } else {
+      return parseInt(setsStr) || 0;
+    }
+  };
+  
+  const totalSets = tempBillData.items.reduce((total, item) => {
+    return total + calculateSetSum(item.sets);
+  }, 0);
+  
+  return (
+    <div className="blue-modal-overlay" onClick={() => {
+      // Only allow closing if not processing draft
+      if (!isProcessingDraft) setIsConfirmModalOpen(false);
+    }}>
+      <div className="blue-modal blue-modal-large" onClick={(e) => e.stopPropagation()}>
+        <div className="blue-modal-header">
+          <div className="blue-modal-header-left">
+            <span className="blue-modal-icon">✅</span>
+            <h3>Confirm Packing List</h3>
+            <span className="blue-modal-badge">Review Before Submission</span>
+          </div>
+          <button 
+            className="blue-modal-close" 
+            onClick={() => {
+              if (!isProcessingDraft) setIsConfirmModalOpen(false);
+            }}
+            disabled={isProcessingDraft}
+          >
+            ✕
+          </button>
         </div>
-        <div style={{ marginLeft: 'auto' }}>
-          <strong>Time:</strong> {new Date().toLocaleString()}
-        </div>
-      </div>
+        <div className="blue-modal-body">
+          <div className="blue-user-info-bar" style={{ 
+            backgroundColor: '#e8f0fe', 
+            padding: '10px 15px', 
+            borderRadius: '8px', 
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontSize: '13px',
+            border: '1px solid #cbd5e1'
+          }}>
+            <span style={{ fontSize: '18px' }}>👤</span>
+            <div>
+              <strong>Prepared by:</strong> {preparedBy}
+              <span style={{ marginLeft: '10px', color: '#666' }}>({userRole})</span>
+            </div>
+            <div style={{ marginLeft: 'auto' }}>
+              <strong>Time:</strong> {new Date().toLocaleString()}
+            </div>
+          </div>
 
-      <div className="blue-confirm-summary">
-        <div className="blue-summary-card">
-          <div className="blue-summary-label">Party Name</div>
-          <div className="blue-summary-value">{selectedPartyState?.name || tempBillData.partyName}</div>
-        </div>
-        <div className="blue-summary-card">
-          <div className="blue-summary-label">Bill Date</div>
-          <div className="blue-summary-value">{tempBillData.billDate}</div>
-        </div>
-        <div className="blue-summary-card">
-          <div className="blue-summary-label">Total Items</div>
-          <div className="blue-summary-value">{totalItems}</div>
-        </div>
-        <div className="blue-summary-card">
-          <div className="blue-summary-label">Total Quantity</div>
-          <div className="blue-summary-value">{totalQuantity}</div>
-        </div>
-        <div className="blue-summary-card">
-          <div className="blue-summary-label">Total Sets</div>
-          <div className="blue-summary-value">
-            {/* Calculate total sets by summing the actual set values */}
-            {tempBillData.items.reduce((total, item) => {
-              if (!item.sets) return total;
-              
-              // Function to calculate sum from concatenated or '+' separated sets
-              const calculateSetSum = (setsValue) => {
-                const setsStr = String(setsValue);
-                if (setsStr.includes('+')) {
-                  return setsStr.split('+').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
-                } else if (setsStr.length > 2) {
-                  // For concatenated format like "200206" (assuming 2-digit parts)
-                  const partSize = 2;
-                  const parts = [];
-                  for (let i = 0; i < setsStr.length; i += partSize) {
-                    parts.push(parseInt(setsStr.substr(i, partSize)) || 0);
-                  }
-                  return parts.reduce((sum, num) => sum + num, 0);
-                } else {
-                  // Single number like "20"
-                  return parseInt(setsStr) || 0;
-                }
-              };
-              
-              return total + calculateSetSum(item.sets);
-            }, 0)}
+          {/* Processing indicator for draft save */}
+          {isProcessingDraft && (
+            <div style={{
+              backgroundColor: '#e8f0fe',
+              padding: '10px',
+              borderRadius: '8px',
+              marginBottom: '15px',
+              textAlign: 'center',
+              border: '1px solid #3b82f6'
+            }}>
+              <span style={{ marginRight: '8px' }}>💾</span>
+              <strong>Saving draft...</strong> Please wait while we generate PDF and save to sheets
+            </div>
+          )}
+
+          <div className="blue-confirm-summary">
+            <div className="blue-summary-card">
+              <div className="blue-summary-label">Party Name</div>
+              <div className="blue-summary-value">{selectedPartyState?.name || tempBillData.partyName}</div>
+            </div>
+            <div className="blue-summary-card">
+              <div className="blue-summary-label">Bill Date</div>
+              <div className="blue-summary-value">{tempBillData.billDate}</div>
+            </div>
+            <div className="blue-summary-card">
+              <div className="blue-summary-label">Total Items</div>
+              <div className="blue-summary-value">{totalItems}</div>
+            </div>
+            <div className="blue-summary-card">
+              <div className="blue-summary-label">Total Quantity</div>
+              <div className="blue-summary-value">{totalQuantity}</div>
+            </div>
+            <div className="blue-summary-card">
+              <div className="blue-summary-label">Total Sets</div>
+              <div className="blue-summary-value">{totalSets}</div>
+            </div>
+          </div>
+
+          <div className="blue-confirm-table-wrapper">
+            <table className="blue-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Lot No</th>
+                  <th>Brand</th>
+                  <th>Description</th>
+                  <th>Sets</th>
+                  <th>Pc/Set</th>
+                  <th>Op</th>
+                  <th>Loose</th>
+                  <th>Total</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tempBillData.items.map((item, idx) => {
+                  const setSum = calculateSetSum(item.sets);
+                  const isMultipleParts = item.sets && 
+                    (String(item.sets).includes('+') || String(item.sets).length > 2);
+                  
+                  return (
+                    <tr key={item.id}>
+                      <td className="blue-sno">{idx + 1}</td>
+                      <td className="blue-lot-cell">
+                        {item.lotNumber || '-'}
+                        {item.lotNumber && (
+                          <button 
+                            onClick={() => {
+                              setIsConfirmModalOpen(false);
+                              openLotDetails(item.lotNumber);
+                            }} 
+                            className="blue-lot-details-btn"
+                            title="View lot dispatch history"
+                          >
+                            📊
+                          </button>
+                        )}
+                      </td>
+                      <td className="blue-brand-cell">{item.brand || '-'}</td>
+                      <td className="blue-item-name">{item.description}</td>
+                      <td className="blue-qty-cell">
+                        {item.sets ? (
+                          isMultipleParts ? (
+                            <span style={{ fontWeight: '500' }}>
+                              {item.sets} = {setSum}
+                            </span>
+                          ) : (
+                            <span>{setSum}</span>
+                          )
+                        ) : '0'}
+                      </td>
+                      <td className="blue-qty-cell">{item.setsPerPcs || 0}</td>
+                      <td className="blue-qty-cell">{item.looseOperation === 'subtract' ? '➖' : '➕'}</td>
+                      <td className="blue-qty-cell">{item.loosePcs || 0}</td>
+                      <td className="blue-qty-cell blue-total-qty">{item.quantity || 0}</td>
+                      <td className="blue-actions-cell">
+                        <button 
+                          onClick={() => {
+                            setIsConfirmModalOpen(false);
+                            openEditModal(idx);
+                          }} 
+                          className="blue-edit-btn"
+                          title="Edit Item"
+                        >
+                          ✏️
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="blue-confirm-notes">
+            <label>Notes (Optional)</label>
+            <textarea 
+              value={tempBillData.notes || ""} 
+              onChange={(e) => setTempBillData({ ...tempBillData, notes: e.target.value })}
+              placeholder="Add any additional notes..."
+              className="blue-textarea"
+              rows="2"
+              disabled={isProcessingDraft}
+            />
           </div>
         </div>
-      </div>
-
-      <div className="blue-confirm-table-wrapper">
-        <table className="blue-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Lot No</th>
-              <th>Brand</th>
-              <th>Description</th>
-              <th>Sets</th>
-              <th>Pc/Set</th>
-              <th>Op</th>
-              <th>Loose</th>
-              <th>Total</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tempBillData.items.map((item, idx) => {
-              // Function to calculate the sum of set parts
-              const calculateSetSum = (setsValue) => {
-                if (!setsValue) return 0;
-                const setsStr = String(setsValue);
-                if (setsStr.includes('+')) {
-                  return setsStr.split('+').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
-                } else if (setsStr.length > 2) {
-                  // For concatenated format like "200206" (assuming 2-digit parts)
-                  const partSize = 2;
-                  const parts = [];
-                  for (let i = 0; i < setsStr.length; i += partSize) {
-                    parts.push(parseInt(setsStr.substr(i, partSize)) || 0);
-                  }
-                  return parts.reduce((sum, num) => sum + num, 0);
-                } else {
-                  // Single number like "20"
-                  return parseInt(setsStr) || 0;
-                }
-              };
-              
-              const setSum = calculateSetSum(item.sets);
-              const isMultipleParts = item.sets && 
-                (String(item.sets).includes('+') || String(item.sets).length > 2);
-              
-              return (
-                <tr key={item.id}>
-                  <td className="blue-sno">{idx + 1}</td>
-                  <td className="blue-lot-cell">
-                    {item.lotNumber || '-'}
-                    {item.lotNumber && (
-                      <button 
-                        onClick={() => {
-                          setIsConfirmModalOpen(false);
-                          openLotDetails(item.lotNumber);
-                        }} 
-                        className="blue-lot-details-btn"
-                        title="View lot dispatch history"
-                      >
-                        📊
-                      </button>
-                    )}
-                  </td>
-                  <td className="blue-brand-cell">{item.brand || '-'}</td>
-                  <td className="blue-item-name">{item.description}</td>
-                  <td className="blue-qty-cell">
-                    {item.sets ? (
-                      isMultipleParts ? (
-                        <span style={{ fontWeight: '500' }}>
-                          {item.sets} = {setSum}
-                        </span>
-                      ) : (
-                        <span>{setSum}</span>
-                      )
-                    ) : '0'}
-                  </td>
-                  <td className="blue-qty-cell">{item.setsPerPcs || 0}</td>
-                  <td className="blue-qty-cell">{item.looseOperation === 'subtract' ? '➖' : '➕'}</td>
-                  <td className="blue-qty-cell">{item.loosePcs || 0}</td>
-                  <td className="blue-qty-cell blue-total-qty">{item.quantity || 0}</td>
-                  <td className="blue-actions-cell">
-                    <button 
-                      onClick={() => {
-                        setIsConfirmModalOpen(false);
-                        openEditModal(idx);
-                      }} 
-                      className="blue-edit-btn"
-                      title="Edit Item"
-                    >
-                      ✏️
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="blue-confirm-notes">
-        <label>Notes (Optional)</label>
-        <textarea 
-          value={tempBillData.notes || ""} 
-          onChange={(e) => setTempBillData({ ...tempBillData, notes: e.target.value })}
-          placeholder="Add any additional notes..."
-          className="blue-textarea"
-          rows="2"
-        />
+        <div className="blue-modal-footer">
+          <button 
+            onClick={() => setIsConfirmModalOpen(false)} 
+            className="blue-btn blue-btn-secondary"
+            disabled={isProcessingDraft}
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={() => handleFinalAction('draft')} 
+            className="blue-btn blue-btn-secondary blue-btn-large"
+            disabled={isProcessingDraft}
+          >
+            {isProcessingDraft ? "💾 Saving Draft..." : "💾 Save as Draft"}
+          </button>
+          <button 
+            onClick={() => handleFinalAction('final')} 
+            className="blue-btn blue-btn-primary blue-btn-large"
+            disabled={isProcessingDraft}
+          >
+            ✅ Final Submission
+          </button>
+        </div>
       </div>
     </div>
-    <div className="blue-modal-footer">
-      <button onClick={() => setIsConfirmModalOpen(false)} className="blue-btn blue-btn-secondary">
-        Cancel
-      </button>
-      <button onClick={() => handleFinalAction('draft')} className="blue-btn blue-btn-secondary blue-btn-large">
-        💾 Save as Draft
-      </button>
-      <button onClick={() => handleFinalAction('final')} className="blue-btn blue-btn-primary blue-btn-large">
-        ✅ Final Submission
-      </button>
-    </div>
-  </div>
-</div>
-    );
-  };
+  );
+};
 
   const generateLotSummaryPDF = async (lotNumber, lotDetailsData) => {
     setGeneratingPDF(true);

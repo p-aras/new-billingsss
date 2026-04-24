@@ -1619,8 +1619,13 @@ function DraftPackingList({ onBack, onConvertToDispatch, parties, currentUser })
         doc.setTextColor(0, 0, 0);
       }
 
-      const fileName = `PackingList_${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || packingData.orderNo}_${new Date().toISOString().split('T')[0]}.pdf`;
-      doc.save(fileName);
+   // Sanitize party name for filename (remove special characters)
+const sanitizedPartyName = (packingData.partyName || 'UNKNOWN')
+  .replace(/[^a-zA-Z0-9]/g, '_')  // Replace special chars with underscore
+  .substring(0, 30);  // Limit length to 30 characters
+
+const fileName = `${sanitizedPartyName}_PackingList_${packingData.billNumber || packingData.packingNumber || packingData.draftNumber || packingData.orderNo}_${new Date().toISOString().split('T')[0]}.pdf`;
+doc.save(fileName);
       
       return true;
 
