@@ -492,7 +492,7 @@ function Home() {
         <div className="header-white">
           <div className="header-content">
             <div className="header-left">
-              <h1 className="title-white">Dispatch Management System</h1>
+              <h1 className="title-white">Dispatch  System</h1>
               <p className="subtitle-white">Streamline your logistics operations with powerful tools</p>
             </div>
             <div className="header-right">

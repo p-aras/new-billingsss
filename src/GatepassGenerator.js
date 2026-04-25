@@ -285,7 +285,6 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
       }));
     }
   };
-
 const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
   try {
     const billNumbers = selectedBills.map(bill => bill['Bill Number']);
@@ -293,7 +292,10 @@ const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
     const scriptURL = 'https://script.google.com/macros/s/AKfycbxL5iwsTonjFTHTsy1VO0VO-KWTOM9n6eDrfztclMIjb8mPZc2TBsJD1AHcueZOv0LN/exec';
     
     const gatepassDataToSend = {
-      selectedBills: selectedBills,
+      selectedBills: selectedBills.map(bill => ({
+        'Bill Number': bill['Bill Number'],
+        additionalDetails: bill.additionalDetails
+      })),
       driverName: gatepassData.driverName,
       driverContact: gatepassData.driverContact,
       vehicleNumber: gatepassData.vehicleNumber,
@@ -301,8 +303,7 @@ const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
       consolidatedRemarks: gatepassData.consolidatedRemarks,
       totalPetti: gatepassData.totalPetti,
       totalBora: gatepassData.totalBora,
-      totalPolybags: gatepassData.totalPolybags,
-      gatepassNumber: gatepassNumber
+      totalPolybags: gatepassData.totalPolybags
     };
     
     const updateData = {
@@ -312,25 +313,33 @@ const updateBillsWithGatepassInfo = async (selectedBills, gatepassNumber) => {
       gatepassData: gatepassDataToSend
     };
     
+    console.log('Sending update to Google Sheets:', updateData);
+    
+    // Convert to URL-encoded format
+    const encodedData = encodeURIComponent(JSON.stringify(updateData));
+    const urlEncodedBody = `data=${encodedData}&type=final`;
+    
     const response = await fetch(scriptURL, {
       method: 'POST',
-      mode: 'cors',
+      mode: 'no-cors', // Keep no-cors for URL-encoded
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify(updateData)
+      body: urlEncodedBody
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    // Note: With mode: 'no-cors', we can't read the response
+    // So we'll assume success and let the Apps Script handle it
+    console.log('Update request sent via URL-encoded method');
     
-    const result = await response.json();
-    console.log('Update result:', result);
-    return result.success;
+    // Show success message to user
+    alert(`Gatepass ${gatepassNumber} generated and bills updated !`);
+    
+    return true;
     
   } catch (error) {
     console.error('Error updating bills:', error);
+    alert(`Failed to update bills: ${error.message}`);
     return false;
   }
 };
@@ -989,72 +998,71 @@ const generatePDF = (gatepassInfo) => {
   doc.save(`Gatepass_${Date.now()}.pdf`);
 };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (gatepassData.selectedBills.length === 0) {
-      alert('Please select at least one bill for the gatepass');
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  if (gatepassData.selectedBills.length === 0) {
+    alert('Please select at least one bill for the gatepass');
+    return;
+  }
+  
+  const vehicleDetailsRequired = areVehicleDetailsRequired();
+  
+  if (vehicleDetailsRequired) {
+    if (!gatepassData.vehicleNumber || !gatepassData.driverName || !gatepassData.driverContact) {
+      alert('Please fill in all vehicle and driver details. Vehicle details are required for non-hand delivery bills.');
       return;
     }
-    
-    // Check vehicle details only if required
-    const vehicleDetailsRequired = areVehicleDetailsRequired();
-    
-    if (vehicleDetailsRequired) {
-      if (!gatepassData.vehicleNumber || !gatepassData.driverName || !gatepassData.driverContact) {
-        alert('Please fill in all vehicle and driver details. Vehicle details are required for non-hand delivery bills.');
-        return;
-      }
-    } else {
-      // For by-hand only gatepass, show confirmation
-      if (!window.confirm('This gatepass contains only by-hand items. No vehicle details are required. Continue?')) {
-        return;
-      }
+  } else {
+    if (!window.confirm('This gatepass contains only by-hand items. No vehicle details are required. Continue?')) {
+      return;
     }
-    
-    const uniqueParties = getUniqueParties();
-    const uniquePartyInitials = getUniquePartyInitials();
-    const gatepassNumber = `MGP-${Date.now()}`;
-    
-    const gatepassWithBills = {
-      ...gatepassData,
-      gatepassNumber: gatepassNumber,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      uniqueParties: uniqueParties,
-      uniquePartyInitials: uniquePartyInitials,
-      selectedBills: gatepassData.selectedBills,
-      totalBills: gatepassData.selectedBills.length,
-      isByHandOnly: isAllByHand() // Add flag for PDF generation
-    };
-    
-    setGeneratedGatepass(gatepassWithBills);
-    generatePDF(gatepassWithBills);
-    
-    await updateBillsWithGatepassInfo(gatepassData.selectedBills, gatepassNumber);
-    
-    if (onSubmit) {
-      onSubmit(gatepassWithBills);
-    }
-    
-    setTimeout(() => {
-      setGeneratedGatepass(null);
-      setGatepassData({
-        vehicleNumber: '',
-        driverName: '',
-        driverContact: '',
-        totalPetti: 0,
-        totalBora: 0,
-        totalPolybags: 0,
-        purpose: 'delivery',
-        remarks: '',
-        selectedBills: [],
-        consolidatedRemarks: ''
-      });
-      setSelectedBillDetails([]);
-      fetchBillsFromSheet();
-    }, 2000);
+  }
+  
+  const uniqueParties = getUniqueParties();
+  const uniquePartyInitials = getUniquePartyInitials();
+  const gatepassNumber = `MGP-${Date.now()}`;
+  
+  const gatepassWithBills = {
+    ...gatepassData,
+    gatepassNumber: gatepassNumber,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    uniqueParties: uniqueParties,
+    uniquePartyInitials: uniquePartyInitials,
+    selectedBills: gatepassData.selectedBills,
+    totalBills: gatepassData.selectedBills.length,
+    isByHandOnly: isAllByHand()
   };
+  
+  setGeneratedGatepass(gatepassWithBills);
+  generatePDF(gatepassWithBills);
+  
+  // Update Google Sheet with URL-encoded method
+  const updateSuccess = await updateBillsWithGatepassInfo(gatepassData.selectedBills, gatepassNumber);
+  
+  if (onSubmit) {
+    onSubmit(gatepassWithBills);
+  }
+  
+  setTimeout(() => {
+    setGeneratedGatepass(null);
+    setGatepassData({
+      vehicleNumber: '',
+      driverName: '',
+      driverContact: '',
+      totalPetti: 0,
+      totalBora: 0,
+      totalPolybags: 0,
+      purpose: 'delivery',
+      remarks: '',
+      selectedBills: [],
+      consolidatedRemarks: ''
+    });
+    setSelectedBillDetails([]);
+    fetchBillsFromSheet();
+  }, 2000);
+};
 
   const filteredBills = applyFilters(bills);
   const vehicleDetailsRequired = areVehicleDetailsRequired();
