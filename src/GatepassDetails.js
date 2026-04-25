@@ -223,6 +223,7 @@ const downloadGatepassPDF = (isSingle = false, singleItem = null) => {
         return '';
       } catch (error) {
         console.error("Date formatting error:", error);
+        console.log("Hello");
         return String(dateValue);
       }
     };
