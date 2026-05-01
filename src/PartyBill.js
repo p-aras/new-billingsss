@@ -6,7 +6,7 @@ import "./PartyBill.css";
 import jsPDF from 'jspdf';
 
 // Google Apps Script URL - REPLACE WITH YOUR DEPLOYED WEB APP URL
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzH-wYV-ZBegx5QyJ-6yDRvEzxgzgjjE7CN_KY6G9RuV7QW_GA4nSbhCDc1lI-r7o6U/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyjxBL0ujNRvpUp2NHfwfjRUZS3ryqNks5pFmS9UuSoR8fF87S_W1AnFEwMSmaoz_xk/exec";
 
 // Bills Sheet ID - Replace with your Bills sheet ID
 const BILLS_SHEET_ID = "1s8cXaMtG2XSxdOu1Ecve5aLI2MQcbMjVsn6Sih4hItk";
@@ -395,26 +395,32 @@ const saveBillToGoogleSheet = async (billData) => {
     
     addDebugMessage(`Saving ${billData.documentType || 'FINAL'} bill ...`, 'info');
     
+    // IMPORTANT: Ensure status is set to FINAL
     const billDataWithPreparer = {
       ...billData,
       preparedBy: preparedBy,
       preparedByRole: userRole,
       preparedByEmail: userEmail,
-      preparedAt: new Date().toISOString()
+      preparedAt: new Date().toISOString(),
+      status: 'FINAL',      // Explicitly set status
+      documentType: 'FINAL', // Explicitly set document type
+      action: 'createPackingList'
     };
     
-    // Determine type based on document status
-    const saveType = billData.status === 'DRAFT' ? 'draft' : 'final';
+    // Log what we're sending for debugging
+    addDebugMessage(`Sending bill data with status: ${billDataWithPreparer.status}, docType: ${billDataWithPreparer.documentType}`, 'info');
+    addDebugMessage(`Bill number: ${billDataWithPreparer.packingNumber || billDataWithPreparer.billNumber}`, 'info');
     
-    const encodedData = encodeURIComponent(JSON.stringify(billDataWithPreparer));
-    const urlEncodedData = `data=${encodedData}&type=${saveType}`;
+    // Use URLSearchParams format (same as Job Order component)
+    const formData = new URLSearchParams();
+    formData.append('payload', JSON.stringify(billDataWithPreparer));
     
     const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: urlEncodedData
+      body: formData.toString()
     });
     
     if (!response.ok) {
@@ -424,8 +430,8 @@ const saveBillToGoogleSheet = async (billData) => {
     const result = await response.json();
     
     if (result.success) {
-      addDebugMessage(`✅ ${billData.documentType || 'FINAL'} bill ${billData.packingNumber} saved`, 'success');
-      showToast(`${billData.documentType || 'FINAL'} bill saved to Google Sheets`, "success");
+      addDebugMessage(`✅ ${billData.documentType || 'FINAL'} bill saved`, 'success');
+      showToast(`Bill saved to Google Sheets`, "success");
       await fetchLotSummary();
       return true;
     } else {
@@ -435,12 +441,11 @@ const saveBillToGoogleSheet = async (billData) => {
   } catch (error) {
     console.error("Error saving to Google Sheets:", error);
     addDebugMessage(`❌ Failed to save: ${error.message}`, 'error');
-    showToast(`Failed to save to Google Sheets: ${error.message}`, "error");
+    showToast(`Failed to save: ${error.message}`, "error");
     return false;
   } finally {
-    // Don't clear here - let the calling function handle it
-    // setSavingToSheet(false);
-    // setProcessingStage(null);
+    setSavingToSheet(false);
+    setProcessingStage(null);
   }
 };
 // NEW FUNCTION: Save bill as draft
@@ -1084,47 +1089,75 @@ const generateDraftPDF = async (draftData) => {
 const handleFinalSubmission = async () => {
   if (!tempBillData) return;
   
-  // Use 'PL' prefix for Final Bills (Packing List)
-  const packingNumber = await getNextPackingNumber('PL');
+  setGeneratingPDF(true);
+  setProcessingStage('pdf');
   
-  const packingDataForStorage = {
-    billNumber: packingNumber,
-    packingNumber: packingNumber,
-    partyName: selectedPartyState?.name || tempBillData.partyName,
-    billDate: tempBillData.billDate,
-    dueDate: tempBillData.dueDate,
-    orderReference: tempBillData.orderReference || "",
-    items: tempBillData.items.map(item => ({
-      id: item.id,
-      barcode: item.barcode,
-      lotNumber: item.lotNumber,
-      brand: item.brand,
-      description: item.description,
-      sets: item.sets,
-      setsPerPcs: item.setsPerPcs,
-      loosePcs: item.loosePcs,
-      looseOperation: item.looseOperation || "add",
-      quantity: item.quantity,
-      colors: item.colors,
-      sizes: item.sizes
-    })),
-    notes: tempBillData.notes,
-    createdDate: new Date().toISOString(),
-    preparedBy: preparedBy,
-    preparedByRole: userRole,
-    preparedByEmail: userEmail,
-    status: 'FINAL',
-    documentType: 'FINAL'
-  };
-  
-  const pdfGenerated = await generatePackingList(packingDataForStorage);
-  
-  if (pdfGenerated) {
-    await saveBillToGoogleSheet(packingDataForStorage);
+  try {
+    // Use 'PL' prefix for Final Bills (Packing List)
+    const packingNumber = await getNextPackingNumber('PL');
+    
+    const packingDataForStorage = {
+      billNumber: packingNumber,
+      packingNumber: packingNumber,
+      partyName: selectedPartyState?.name || tempBillData.partyName,
+      billDate: tempBillData.billDate,
+      dueDate: tempBillData.dueDate,
+      orderReference: tempBillData.orderReference || "",
+      items: tempBillData.items.map(item => ({
+        id: item.id,
+        barcode: item.barcode,
+        lotNumber: item.lotNumber,
+        brand: item.brand,
+        description: item.description,
+        sets: item.sets,
+        setsPerPcs: item.setsPerPcs,
+        loosePcs: item.loosePcs,
+        looseOperation: item.looseOperation || "add",
+        quantity: item.quantity,
+        colors: item.colors,
+        sizes: item.sizes
+      })),
+      notes: tempBillData.notes,
+      createdDate: new Date().toISOString(),
+      preparedBy: preparedBy,
+      preparedByRole: userRole,
+      preparedByEmail: userEmail,
+      status: 'FINAL',      // CRITICAL: Set to FINAL
+      documentType: 'FINAL'  // CRITICAL: Set to FINAL
+    };
+    
+    addDebugMessage(`Preparing final submission: ${packingNumber}`, 'info');
+    addDebugMessage(`Status: ${packingDataForStorage.status}, Document Type: ${packingDataForStorage.documentType}`, 'info');
+    
+    // Generate PDF first
+    setProcessingStage('pdf');
+    const pdfGenerated = await generatePackingList(packingDataForStorage);
+    
+    if (!pdfGenerated) {
+      throw new Error('PDF generation failed');
+    }
+    
+    addDebugMessage(`PDF generated successfully for ${packingNumber}`, 'success');
+    
+    // Then save to sheet (this will trigger email on the server side)
+    setProcessingStage('sheet');
+    const saved = await saveBillToGoogleSheet(packingDataForStorage);
+    
+    if (!saved) {
+      throw new Error('Failed to save to Google Sheets');
+    }
+    
+    addDebugMessage(`Bill saved to sheet: ${packingNumber}`, 'success');
+    
+    // Success animation and cleanup
     setShowSuccessAnimation(true);
     setProcessingStage('complete');
-    setTimeout(() => setShowSuccessAnimation(false), 2000);
-    setTimeout(() => setProcessingStage(null), 2000);
+    
+    setTimeout(() => {
+      setShowSuccessAnimation(false);
+      setProcessingStage(null);
+      setGeneratingPDF(false);
+    }, 2000);
     
     if (onSubmit) onSubmit(packingDataForStorage);
     
@@ -1149,10 +1182,19 @@ const handleFinalSubmission = async () => {
     setTempBillData(null);
     setTempBillDataForDraft(null);
     
-    showToast(`Packing list ${packingNumber} generated successfully!`, 'success');
+    showToast(`Packing list ${packingNumber} generated and email sent!`, 'success');
     
     if (barcodeInputRef.current) barcodeInputRef.current.focus();
     await fetchLotSummary();
+    
+    setIsConfirmModalOpen(false);
+    
+  } catch (error) {
+    console.error("Error in handleFinalSubmission:", error);
+    addDebugMessage(`❌ Final submission failed: ${error.message}`, 'error');
+    showToast(`Failed to save: ${error.message}`, "error");
+    setProcessingStage(null);
+    setGeneratingPDF(false);
   }
 };
   // ==================== LOT DETAILS FUNCTIONS ====================
@@ -1492,7 +1534,7 @@ const getLotInfo = (lotNumber) => {
   const addDebugMessage = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setScannerDebug(prev => [...prev, { timestamp, message, type }].slice(-20));
-    console.log(`[Scanner Debug ${timestamp}]:`, message);
+    // console.log(`[Scanner Debug ${timestamp}]:`, message);
   };
 
   const getMockData = () => {
@@ -1643,7 +1685,7 @@ const getLotInfo = (lotNumber) => {
   // Sportswear & Athletic
   'ADIDAS','NIKE','PUMA','REEBOK','UNDER ARMOUR','GYMSHARK','ASICS','NEW BALANCE',
   'FILA','COLUMBIA','THE NORTH FACE','PATAGONIA','SALOMON','DECATHLON','KAPPA',
-  'UMBRO','JORDAN','SKECHERS','LACOSTE','LORO PIANA','GANT','HOODRICH','UNDER ARMOUR',
+  'UMBRO','JORDAN','SKECHERS','LACOSTE','LORO PIANA','GANT','HOODRICH','UNDER ARMOUR','CALVIN','SUPERDRY',
 
   // Luxury Fashion
   'GUCCI','LOUIS VUITTON','BALENCIAGA','DIOR','HERMES','PRADA','VERSACE','FENDI',
@@ -1821,10 +1863,10 @@ const getLotInfo = (lotNumber) => {
 };
 // Add this function to debug old lot data
 const debugOldLotData = () => {
-  console.log("Old Lot Data:", oldLotData);
-  console.log("Old Lot Count:", oldLotData.length);
+  // console.log("Old Lot Data:", oldLotData);
+  // console.log("Old Lot Count:", oldLotData.length);
   oldLotData.forEach(lot => {
-    console.log(`Lot: ${lot['Lot Number']}, Description: ${lot['Garment Type'] || lot['Item Name']}, Brand: ${lot['Party Name'] || lot['Brand']}`);
+    // console.log(`Lot: ${lot['Lot Number']}, Description: ${lot['Garment Type'] || lot['Item Name']}, Brand: ${lot['Party Name'] || lot['Brand']}`);
   });
   addDebugMessage(`Debug: ${oldLotData.length} old lots loaded`, 'info');
   
@@ -1839,7 +1881,7 @@ const debugOldLotData = () => {
     if (!values || values.length < 2) return [];
     
     const headers = values[0];
-    console.log("Sheet headers:", headers);
+    // console.log("Sheet headers:", headers);
     addDebugMessage(`Sheet headers: ${headers.join(', ')}`, 'info');
     
     const rows = values.slice(1);
@@ -2320,18 +2362,15 @@ const getParentLotNumber = (lotNumber) => {
       return;
     }
     
-    if (currentProduct.lotNumber) {
-      const lotInfo = lotSummary.find(l => l.lotNumber === currentProduct.lotNumber);
-      const isOldLot = lotInfo && lotInfo.isOldLot;
-      
-      if (!isOldLot) {
-        const availability = checkLotAvailability(currentProduct.lotNumber, currentProduct.quantity);
-        if (!availability.available) {
-          showToast(availability.message, "error");
-          return;
-        }
-      }
-    }
+ // Lot restriction removed - allow any quantity
+if (currentProduct.lotNumber) {
+  const lotInfo = lotSummary.find(l => l.lotNumber === currentProduct.lotNumber);
+  // Just log for information, but don't block
+  if (lotInfo && !lotInfo.isOldLot && lotInfo.availablePieces < currentProduct.quantity) {
+    addDebugMessage(`Note: Requested quantity (${currentProduct.quantity}) exceeds available (${lotInfo.availablePieces})`, 'warning');
+    // Allow it anyway - no restriction
+  }
+}
     
     const newItem = {
       id: Date.now(),
@@ -2393,19 +2432,14 @@ const getParentLotNumber = (lotNumber) => {
     updatedItems[index].quantity = newQuantity;
     
     const item = updatedItems[index];
-    if (item.lotNumber) {
-      const lotInfo = lotSummary.find(l => l.lotNumber === item.lotNumber);
-      const isOldLot = lotInfo && lotInfo.isOldLot;
-      
-      if (!isOldLot && lotInfo) {
-        const existingLotItems = updatedItems.filter(i => i.lotNumber === item.lotNumber && i.id !== item.id);
-        const totalRequested = existingLotItems.reduce((sum, i) => sum + i.quantity, 0) + newQuantity;
-        
-        if (totalRequested > lotInfo.availablePieces) {
-          showToast(`Warning: Total requested (${totalRequested}) exceeds available (${lotInfo.availablePieces})`, "warning");
-        }
-      }
-    }
+  // Restriction removed - just show warning but allow
+if (item.lotNumber) {
+  const lotInfo = lotSummary.find(l => l.lotNumber === item.lotNumber);
+  if (lotInfo && !lotInfo.isOldLot && lotInfo.availablePieces < newQuantity) {
+    addDebugMessage(`Warning: Requested quantity (${newQuantity}) exceeds available (${lotInfo.availablePieces})`, 'warning');
+    // Still allow the update
+  }
+}
     
     setBillForm({ ...billForm, items: updatedItems });
   };
@@ -2424,18 +2458,14 @@ const getParentLotNumber = (lotNumber) => {
         return;
       }
       
-      if (editItemData.lotNumber) {
-        const lotInfo = lotSummary.find(l => l.lotNumber === editItemData.lotNumber);
-        const isOldLot = lotInfo && lotInfo.isOldLot;
-        
-        if (!isOldLot) {
-          const availability = checkLotAvailability(editItemData.lotNumber, editItemData.quantity);
-          if (!availability.available) {
-            showToast(availability.message, "error");
-            return;
-          }
-        }
-      }
+    // Remove restriction - allow any quantity
+if (editItemData.lotNumber) {
+  const lotInfo = lotSummary.find(l => l.lotNumber === editItemData.lotNumber);
+  if (lotInfo && !lotInfo.isOldLot && lotInfo.availablePieces < editItemData.quantity) {
+    addDebugMessage(`Note: Quantity (${editItemData.quantity}) exceeds available (${lotInfo.availablePieces})`, 'warning');
+  }
+  // Allow the edit regardless
+}
       
       const updatedItems = [...billForm.items];
       updatedItems[editingItemIndex] = editItemData;

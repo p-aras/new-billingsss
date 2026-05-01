@@ -11,9 +11,10 @@ import BarcodeScanner from "./BarcodeScanner";
 import PartyBill from "./PartyBill";
 import PartySelection from "./PartySelection";
 import GatepassGenerator from "./GatepassGenerator";
-import GatepassDetails from "./GatepassDetails"; // ADD THIS IMPORT
+import GatepassDetails from "./GatepassDetails";
 import Login from "./Login";
 import DraftPackingList from "./DraftPackingList";
+import ManualStickerCreate from "./ManualStickerCreate";
 
 function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -31,7 +32,8 @@ function Home() {
     onTimeRate: 0,
     totalParties: 0,
     totalBills: 0,
-    totalGatepasses: 0
+    totalGatepasses: 0,
+    totalManualStickers: 0
   });
   
   const [recentDispatches, setRecentDispatches] = useState([]);
@@ -61,9 +63,9 @@ function Home() {
   const [bills, setBills] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
   const [gatepasses, setGatepasses] = useState([]);
+  const [manualStickers, setManualStickers] = useState([]);
 
   useEffect(() => {
-    // Check if user is already logged in
     const authenticated = localStorage.getItem("isAuthenticated");
     const userData = localStorage.getItem("userData");
     
@@ -78,7 +80,6 @@ function Home() {
       setShowSplash(false);
     }
     
-    // Only load data if authenticated
     if (authenticated === "true") {
       loadDashboardData();
       loadParties();
@@ -86,6 +87,7 @@ function Home() {
       loadStickers();
       loadBills();
       loadGatepasses();
+      loadManualStickers();
     }
   }, []);
 
@@ -99,6 +101,7 @@ function Home() {
     const savedParties = JSON.parse(localStorage.getItem("parties") || "[]");
     const savedBills = JSON.parse(localStorage.getItem("bills") || "[]");
     const savedGatepasses = JSON.parse(localStorage.getItem("gatepasses") || "[]");
+    const savedManualStickers = JSON.parse(localStorage.getItem("manualStickers") || "[]");
     const today = new Date().toDateString();
     
     const completedToday = savedDispatches.filter(
@@ -119,7 +122,8 @@ function Home() {
       onTimeRate: onTimeRate,
       totalParties: savedParties.length,
       totalBills: savedBills.length,
-      totalGatepasses: savedGatepasses.length
+      totalGatepasses: savedGatepasses.length,
+      totalManualStickers: savedManualStickers.length
     });
   };
 
@@ -147,16 +151,21 @@ function Home() {
     setGatepasses(savedGatepasses);
   };
 
+  const loadManualStickers = () => {
+    const savedManualStickers = JSON.parse(localStorage.getItem("manualStickers") || "[]");
+    setManualStickers(savedManualStickers);
+  };
+
   const handleLogin = (userData) => {
     setIsAuthenticated(true);
     setUser(userData);
-    // Load all data after login
     loadDashboardData();
     loadParties();
     loadRecentDispatches();
     loadStickers();
     loadBills();
     loadGatepasses();
+    loadManualStickers();
     showToast(`Welcome back, ${userData.username}!`, 'success');
   };
 
@@ -230,6 +239,26 @@ function Home() {
     showToast(`${stickerData.quantity} ${stickerData.title} sticker(s) created successfully!`, 'success');
     setStickerData({ title: "", content: "", type: "shipping", size: "medium", quantity: 1 });
     loadDashboardData();
+  };
+
+  const handleManualStickerSubmit = (stickerData) => {
+    const newSticker = {
+      id: Date.now(),
+      ...stickerData,
+      stickerNumber: `MANUAL-STK-${Date.now()}`,
+      createdDate: new Date().toISOString(),
+      createdBy: user?.username || 'user',
+      status: 'active'
+    };
+    
+    const existingManualStickers = JSON.parse(localStorage.getItem("manualStickers") || "[]");
+    const updatedManualStickers = [newSticker, ...existingManualStickers];
+    localStorage.setItem("manualStickers", JSON.stringify(updatedManualStickers));
+    setManualStickers(updatedManualStickers);
+    
+    showToast(`Manual sticker "${stickerData.stickerTitle}" created successfully!`, 'success');
+    loadDashboardData();
+    setActiveComponent("dashboard");
   };
 
   const handlePartySelect = (party) => {
@@ -308,7 +337,8 @@ function Home() {
       title: "Generate Barcode",
       icon: "🔖",
       description: "Create unique barcodes for product tracking and inventory management",
-      theoreticalInfo: "Barcodes encode product information in a visual pattern readable by scanners. Each barcode is unique and can store up to 20+ characters.",
+      theoreticalInfo: "Barcodes encode product information in a visual pattern readable by scanners. Each barcode is unique and can store up to 20+ characters. Uses GS1-128 standards for supply chain compatibility.",
+      details: "✓ GS1-128 Compliant\n✓ Unique identifiers\n✓ Instant scanning",
       stats: "Generate GS1-128 compliant barcodes",
       color: "#4CAF50",
       lightColor: "#E8F5E9"
@@ -318,17 +348,30 @@ function Home() {
       title: "Barcode Scanner",
       icon: "📷",
       description: "Scan barcodes to instantly retrieve product and dispatch information",
-      theoreticalInfo: "Uses camera or laser to read barcode patterns. Decodes information in milliseconds and integrates with your inventory database.",
+      theoreticalInfo: "Uses camera or laser to read barcode patterns. Decodes information in milliseconds using advanced image recognition algorithms and integrates with your inventory database in real-time.",
+      details: "✓ Real-time scanning\n✓ Instant validation\n✓ History tracking",
       stats: "Real-time scanning & validation",
       color: "#00BCD4",
       lightColor: "#E0F7FA"
+    },
+    {
+      id: "manual-sticker",
+      title: "Manual Sticker Create",
+      icon: "🏷️",
+      description: "Create custom manual stickers for products, packages, and special labeling requirements",
+      theoreticalInfo: "Create and print custom stickers manually with specific text, batch numbers, expiry dates, and other variable information for product labeling. Supports multiple formats and sizes.",
+      details: "✓ Custom text & batch numbers\n✓ Multiple sizes & formats\n✓ Print ready output",
+      stats: `${dispatchStats.totalManualStickers} stickers created`,
+      color: "#FF9800",
+      lightColor: "#FFF3E0"
     },
     {
       id: "party",
       title: "Party Profile",
       icon: "👥",
       description: "Maintain comprehensive profiles for customers, suppliers, and partners",
-      theoreticalInfo: "Centralized database storing contact info, GST details, transaction history, and preferences for all business parties.",
+      theoreticalInfo: "Centralized database storing contact info, GST details, transaction history, and preferences for all business parties. Enables seamless communication and transaction tracking.",
+      details: "✓ GST & contact info\n✓ Transaction history\n✓ Preference management",
       stats: `${dispatchStats.totalParties} registered parties`,
       color: "#2196F3",
       lightColor: "#E3F2FD"
@@ -338,7 +381,8 @@ function Home() {
       title: "Create Party Bill",
       icon: "💰",
       description: "Generate professional invoices and track payment history",
-      theoreticalInfo: "Automated billing system calculates taxes, applies discounts, and maintains financial records for accounting compliance.",
+      theoreticalInfo: "Automated billing system calculates taxes, applies discounts, and maintains financial records for accounting compliance. Supports GST calculations and digital signatures.",
+      details: "✓ Automatic tax calculation\n✓ GST compliance\n✓ Digital signatures",
       stats: `${dispatchStats.totalBills} bills generated`,
       color: "#FF5722",
       lightColor: "#FBE9E7"
@@ -348,7 +392,8 @@ function Home() {
       title: "Dispatch Details",
       icon: "🚚",
       description: "Track shipments, manage delivery routes, and monitor fleet performance",
-      theoreticalInfo: "Real-time tracking system with route optimization, delivery confirmation, and performance analytics.",
+      theoreticalInfo: "Real-time tracking system with route optimization, delivery confirmation, and performance analytics. Uses GPS integration and automated status updates for complete visibility.",
+      details: "✓ Real-time tracking\n✓ Route optimization\n✓ Performance analytics",
       stats: `${dispatchStats.activeDispatches} active deliveries`,
       color: "#9C27B0",
       lightColor: "#F3E5F5"
@@ -358,7 +403,8 @@ function Home() {
       title: "Draft Packing List",
       icon: "📝",
       description: "Create and manage draft packing lists before final dispatch",
-      theoreticalInfo: "Create preliminary packing lists, review items, make changes, and convert to final dispatch when ready.",
+      theoreticalInfo: "Create preliminary packing lists, review items, make changes, and convert to final dispatch when ready. Reduces errors by allowing multiple review cycles before finalization.",
+      details: "✓ Multiple review cycles\n✓ Easy modifications\n✓ Convert to final",
       stats: "Save drafts for later processing",
       color: "#607D8B",
       lightColor: "#ECEFF1"
@@ -368,7 +414,8 @@ function Home() {
       title: "Gatepass Creation",
       icon: "🚪",
       description: "Generate security gate passes for vehicle entry and exit with automated tracking",
-      theoreticalInfo: "Digital gatepass system with QR code authentication, vehicle verification, and real-time security logging for warehouse/facility access control.",
+      theoreticalInfo: "Digital gatepass system with QR code authentication, vehicle verification, and real-time security logging for warehouse/facility access control. Enhances security and compliance.",
+      details: "✓ QR code authentication\n✓ Vehicle verification\n✓ Security logging",
       stats: `${dispatchStats.totalGatepasses} gatepasses issued`,
       color: "#3F51B5",
       lightColor: "#E8EAF6"
@@ -379,18 +426,17 @@ function Home() {
       icon: "📋",
       description: "View, track, and manage all generated gatepasses with detailed information",
       theoreticalInfo: "Centralized repository of all gatepasses with status tracking, search functionality, and detailed view of each gatepass including associated bills and dispatch information.",
+      details: "✓ Centralized repository\n✓ Status tracking\n✓ Search functionality",
       stats: `${gatepasses.filter(gp => gp.status === 'active').length} active gatepasses`,
       color: "#009688",
       lightColor: "#E0F2F1"
     },
   ];
 
-  // If not authenticated, show login screen
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
 
-  // If splash screen is showing
   if (showSplash) {
     return <SplashScreen onFinish={handleSplashFinish} duration={3000} />;
   }
@@ -401,6 +447,16 @@ function Home() {
         return <BarcodeGenerator onBack={() => setActiveComponent("dashboard")} />;
       case "barcode-scanner":
         return <BarcodeScanner onBack={() => setActiveComponent("dashboard")} />;
+      case "manual-sticker":
+        return (
+          <ManualStickerCreate
+            parties={parties}
+            manualStickers={manualStickers}
+            onSubmit={handleManualStickerSubmit}
+            onBack={() => setActiveComponent("dashboard")}
+            currentUser={user}
+          />
+        );
       case "party":
         return (
           <PartyProfile 
@@ -474,7 +530,7 @@ function Home() {
             onBack={() => setActiveComponent("dashboard")}
           />
         );
-      case "gatepass-details": // ADD THIS CASE
+      case "gatepass-details":
         return (
           <GatepassDetails
             onBack={() => setActiveComponent("dashboard")}
@@ -488,60 +544,142 @@ function Home() {
   const renderDashboard = () => {
     return (
       <div className="dashboard-white">
-        {/* Header Section with Logout Button */}
+        {/* Enhanced Header Section with Stats */}
         <div className="header-white">
           <div className="header-content">
             <div className="header-left">
-              <h1 className="title-white">Dispatch  System</h1>
-              <p className="subtitle-white">Streamline your logistics operations with powerful tools</p>
+              <h1 className="title-white">
+                <span className="title-gradient">DISPATCH MANAGEMENT SYSTEM</span>
+              </h1>
+              <p className="subtitle-white">
+                Enterprise Logistics Management System
+              </p>
             </div>
             <div className="header-right">
-              <div className="user-info">
-                <span className="user-icon">👤</span>
-                <span className="user-name">{user?.fullName || user?.username}</span>
-                <span className="user-role">{user?.role === "admin" ? "Admin" : "User"}</span>
+              <div className="user-info-card">
+                <div className="user-avatar">
+                  <span className="user-icon">👤</span>
+                </div>
+                <div className="user-details">
+                  <span className="user-name">{user?.fullName || user?.username}</span>
+                  <span className="user-role">{user?.role === "admin" ? "Administrator" : "Team Member"}</span>
+                </div>
               </div>
-              <button onClick={handleLogout} className="logout-button">
-                🚪 Logout
+              <button onClick={handleLogout} className="logout-button-enhanced">
+                <span className="logout-icon">🚪</span>
+                <span className="logout-text">Logout</span>
               </button>
             </div>
           </div>
+          
+          {/* Enhanced Stats Row */}
+          {/* <div className="header-stats-row">
+            <div className="stat-card">
+              <div className="stat-icon">📦</div>
+              <div className="stat-info">
+                <div className="stat-value">{dispatchStats.totalDispatches}</div>
+                <div className="stat-label">Total Dispatches</div>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon">🚚</div>
+              <div className="stat-info">
+                <div className="stat-value">{dispatchStats.activeDispatches}</div>
+                <div className="stat-label">Active Deliveries</div>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon">✅</div>
+              <div className="stat-info">
+                <div className="stat-value">{dispatchStats.completedToday}</div>
+                <div className="stat-label">Completed Today</div>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon">⏱️</div>
+              <div className="stat-info">
+                <div className="stat-value">{dispatchStats.onTimeRate}%</div>
+                <div className="stat-label">On-Time Rate</div>
+              </div>
+            </div>
+          </div> */}
         </div>
 
-        {/* Quick Actions Grid with Large Cards */}
+        {/* Quick Stats Summary */}
+        {/* <div className="quick-stats-summary">
+          <div className="summary-item">
+            <span className="summary-label">Fleet Status:</span>
+            <span className="summary-value">{dispatchStats.availableDrivers}/{dispatchStats.totalDrivers} Drivers Available</span>
+          </div>
+          <div className="summary-divider"></div>
+          <div className="summary-item">
+            <span className="summary-label">Pending Tasks:</span>
+            <span className="summary-value">{dispatchStats.pendingDispatches} Dispatches Need Action</span>
+          </div>
+          <div className="summary-divider"></div>
+          <div className="summary-item">
+            <span className="summary-label">Business Partners:</span>
+            <span className="summary-value">{dispatchStats.totalParties} Active Parties</span>
+          </div>
+        </div> */}
+
+        {/* Action Modules Section */}
         <div className="actions-section">
-          <div className="actions-grid-large">
+          {/* <div className="section-header-enhanced">
+            <div className="section-badge">⚡ Quick Access</div>
+            <h2 className="section-title-enhanced">Action Modules</h2>
+            <p className="section-subtitle-enhanced">
+              Select any module below to start managing your logistics operations
+            </p>
+          </div> */}
+          
+          <div className="actions-grid-enhanced">
             {navigationCards.map((card, index) => (
               <div 
                 key={card.id}
-                className="action-card-large"
+                className="action-card-enhanced"
                 onClick={() => setActiveComponent(card.id)}
-                style={{ animationDelay: `${index * 0.05}s` }}
+                style={{ 
+                  animationDelay: `${index * 0.05}s`,
+                  borderTopColor: card.color 
+                }}
               >
-                <div className="card-header" style={{ borderBottomColor: card.lightColor }}>
-                  <div className="icon-container" style={{ backgroundColor: card.lightColor }}>
-                    <span className="card-icon" style={{ color: card.color }}>{card.icon}</span>
-                  </div>
-                  <div className="card-title-section">
-                    <h3 className="card-title-large">{card.title}</h3>
-                    <span className="card-stats" style={{ color: card.color }}>{card.stats}</span>
+                <div className="card-icon-section" style={{ backgroundColor: card.lightColor }}>
+                  <span className="card-icon-enhanced" style={{ color: card.color }}>{card.icon}</span>
+                </div>
+                
+                <div className="card-content-section">
+                  <h3 className="card-title-enhanced">{card.title}</h3>
+                  <p className="card-description-enhanced">{card.description}</p>
+                  
+                  <div className="card-badge" style={{ backgroundColor: card.lightColor, color: card.color }}>
+                    {card.stats}
                   </div>
                 </div>
                 
-                <div className="card-body">
-                  <p className="card-description">{card.description}</p>
-                  <div className="theoretical-box" style={{ backgroundColor: card.lightColor, borderLeftColor: card.color }}>
-                    <div className="theoretical-icon">💡</div>
-                    <div className="theoretical-text">
-                      <span className="theoretical-label">How it works:</span>
-                      <p className="theoretical-info">{card.theoreticalInfo}</p>
+                <div className="card-details-section">
+                  <div className="theoretical-insight">
+                    <div className="insight-icon">💡</div>
+                    <div className="insight-content">
+                      <div className="insight-label">Theoretical Insight</div>
+                      <div className="insight-text">{card.theoreticalInfo}</div>
                     </div>
                   </div>
+                  
+                  <div className="feature-list">
+                    {card.details.split('\n').map((feature, i) => (
+                      <div key={i} className="feature-item">
+                        <span className="feature-check">✓</span>
+                        <span className="feature-text">{feature.replace('✓ ', '')}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 
-                <div className="card-footer">
-                  <button className="action-button" style={{ backgroundColor: card.color }}>
-                    Launch Module →
+                <div className="card-footer-enhanced">
+                  <button className="launch-button" style={{ backgroundColor: card.color }}>
+                    Launch Module
+                    <span className="button-arrow">→</span>
                   </button>
                 </div>
               </div>
@@ -565,7 +703,6 @@ function Home() {
         </div>
       )}
 
-      {/* Floating logout button for all views */}
       <div className="logout-floating">
         <button onClick={handleLogout} className="logout-floating-button" title="Logout">
           🚪

@@ -1698,8 +1698,8 @@ const handlePrintWithCount = useCallback(async (count) => {
                 </div>
               
                 <div style="margin-bottom: 3px;">
-                  <span style="font-weight: bold; font-size: 10px;">STYLE: </span> 
-                  <span style="font-size: 10px;font-weight: bold">AVCHG${lotNumber}</span>
+                  <span style="font-weight: bold; font-size: 11px;">STYLE: </span> 
+                  <span style="font-size: 12px;font-weight: bold">AVCHG${lotNumber}</span>
                 </div>
                 <div style="margin-bottom: 3px;">
                   <span style="font-weight: bold; font-size: 10px;">PACKED-YY: </span> 
@@ -1843,7 +1843,7 @@ const handlePrintWithCount = useCallback(async (count) => {
         padding-top: 2px;
       ">
         <div style="
-          font-size: 16px; 
+          font-size: 20px; 
           font-weight: 900; 
           color: #000000; 
           text-align: left;
@@ -2155,7 +2155,7 @@ const handleSearch = async (e) => {
             </svg>
           </div>
           <div>
-            <h1>BARCODE GENERATOR</h1>
+            <h2>BARCODE GENERATOR</h2>
             <p>Search a Lot No. to generate black & white stickers</p>
           </div>
         </div>
