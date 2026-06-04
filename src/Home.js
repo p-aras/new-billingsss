@@ -504,14 +504,14 @@ function Home() {
             currentUser={user}
           />
         );
-      case "dispatch":
-        return (
-          <DispatchDetails 
-            recentDispatches={recentDispatches}
-            updateDispatchStatus={updateDispatchStatus}
-            onBack={() => setActiveComponent("dashboard")}
-          />
-        );
+      // case "dispatch":
+      //   return (
+      //     <DispatchDetails 
+      //       recentDispatches={recentDispatches}
+      //       updateDispatchStatus={updateDispatchStatus}
+      //       onBack={() => setActiveComponent("dashboard")}
+      //     />
+      //   );
       case "sticker":
         return (
           <StickerGenerator

@@ -3,15 +3,13 @@ import React, { useState, useCallback, useMemo } from 'react';
 import './ManualStickerCreate.css';
 import {
   FiSave, FiArrowLeft, FiTag, FiUser, FiCalendar, FiPackage, 
-  FiPrinter, FiEye, FiInfo, FiCheck, FiAlertTriangle, FiLayers
+  FiPrinter, FiEye, FiInfo, FiCheck, FiAlertTriangle, FiLayers,
+  FiMessageSquare, FiPlus, FiMinus, FiType, FiMaximize, FiMinimize2,
+  FiBold
 } from 'react-icons/fi';
 import JsBarcode from 'jsbarcode';
 
-// Sticker dimensions (same as BarcodeGenerator)
-const STICKER_WIDTH_MM = 61;
-const STICKER_HEIGHT_MM = 40.6;
-
-// Helper functions (copied from BarcodeGenerator)
+// Helper functions (YOUR ORIGINAL)
 function generateVerificationCode(lotNumber) {
   const cleanLot = String(lotNumber).replace(/[^0-9]/g, '');
   let sum = 0;
@@ -42,9 +40,9 @@ function generateBarcodeId(lotNumber, groupLetter = 'A') {
   return `LOT-${cleanLot}${groupLetter}`;
 }
 
-// Sticker Generator Class (same as BarcodeGenerator)
+// Sticker Generator Class (YOUR ORIGINAL)
 class ManualStickerGenerator {
-  static async renderBarcode(canvas, data, width = 300, height = 80) {
+  static async renderBarcode(canvas, data, width = 300, height = 180) {
     return new Promise((resolve) => {
       try {
         const ctx = canvas.getContext('2d');
@@ -89,7 +87,7 @@ class ManualStickerGenerator {
   }
 }
 
-// Sticker Layout Components (same as BarcodeGenerator)
+// ========== YOUR ORIGINAL STICKER LAYOUTS (UNCHANGED) ==========
 const SimpleSticker = ({ sticker, lotNumber, piecesPerSet, totalColors, currentYear, stitchingInitials, packingInitials, barcodeImage }) => {
   const initialsText = [stitchingInitials, packingInitials]
     .filter(initials => initials && initials !== '—' && initials !== 'S' && initials !== 'P')
@@ -244,80 +242,249 @@ const ColorCodedSticker = ({ sticker, lotNumber, piecesPerSet, totalColors, bran
   `;
 };
 
+// ========== UPDATED: Custom Message Sticker with Dynamic Dimensions & Bold Support ==========
+const CustomMessageSticker = ({ messageLines, fontSizePx, borderColor, backgroundColor, stickerIndex, widthMm = 61, heightMm = 40.6, isBold = false }) => {
+  const lines = messageLines.filter(line => line.text !== undefined ? line.text.trim() !== '' : line.trim() !== '');
+  
+  // Handle both old format (string array) and new format (object array with bold)
+  const processedLines = lines.map(line => {
+    if (typeof line === 'string') {
+      return { text: line, bold: isBold };
+    }
+    return { text: line.text, bold: line.bold !== undefined ? line.bold : isBold };
+  });
+  
+  if (processedLines.length === 0) {
+    return `<div style="width: ${widthMm}mm; height: ${heightMm}mm; background: #f0f0f0; display: flex; align-items: center; justify-content: center;">Empty message</div>`;
+  }
+  
+  const textItems = processedLines.map(line => {
+    const escapedLine = line.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const fontWeight = line.bold ? '900' : 'normal';
+    return `<div style="font-size: ${fontSizePx}px; font-weight: ${fontWeight}; line-height: 1.35; margin: 2px 0; word-break: break-word; text-align: center;">${escapedLine}</div>`;
+  }).join('');
+  
+  return `
+    <style>
+      @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+      body { margin: 0; background: white; }
+      @media print {
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      }
+    </style>
+    <div style="width: ${widthMm}mm; height: ${heightMm}mm; background-color: ${backgroundColor}; border: 2px solid ${borderColor}; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 12px; box-sizing: border-box; font-family: 'Inter', 'Segoe UI', Arial, sans-serif; overflow: hidden; position: relative;">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-height: 100%; overflow-y: auto;">
+        ${textItems}
+      </div>
+      ${stickerIndex ? `<div style="position: absolute; bottom: 4px; right: 6px; font-size: 7px; color: #aaa; opacity: 0.6;">#${stickerIndex}</div>` : ''}
+    </div>
+  `;
+};
+
 // Layout Selection Dialog
-const LayoutSelectionDialog = ({ isOpen, onClose, onSelectLayout }) => {
+const LayoutSelectionDialog = ({ isOpen, onClose, onSelectLayout, onSelectCustomMessage }) => {
   const layouts = [
     { id: 'simple', name: 'Simple Layout', description: 'Clean, bold text with scannable barcode', icon: '📄' },
     { id: 'detailed', name: 'Detailed Layout', description: 'More information with PROD/SRN details', icon: '📑' },
     { id: 'compact', name: 'Compact Layout', description: 'Minimalist design with border', icon: '🔲' },
-    { id: 'colorful', name: 'Color Coded', description: 'Color-coded backgrounds for easy sorting', icon: '🎨' }
+    { id: 'colorful', name: 'Color Coded', description: 'Color-coded backgrounds for easy sorting', icon: '🎨' },
+    { id: 'customMessage', name: '✏️ Custom Message Sticker', description: 'Write your own text, adjust font size & dimensions', icon: '💬' }
   ];
 
   if (!isOpen) return null;
 
   return (
-    <div className="layout-dialog-overlay" style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10000
-    }}>
-      <div className="layout-dialog" style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '24px',
-        maxWidth: '600px',
-        width: '90%',
-        maxHeight: '80vh',
-        overflow: 'auto'
-      }}>
-        <h3 style={{ marginBottom: '16px' }}>Select Sticker Layout</h3>
-        <div style={{ display: 'grid', gap: '12px' }}>
+    <div className="layout-dialog-overlay">
+      <div className="layout-dialog">
+        <h3>Select Sticker Layout</h3>
+        <div className="layout-grid">
           {layouts.map(layout => (
             <div
               key={layout.id}
-              onClick={() => onSelectLayout(layout)}
-              style={{
-                padding: '16px',
-                border: '2px solid #e2e8f0',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
+              className="layout-option"
+              onClick={() => {
+                if (layout.id === 'customMessage') {
+                  onSelectCustomMessage();
+                } else {
+                  onSelectLayout(layout);
+                }
               }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = '#3b82f6'}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = '#e2e8f0'}
             >
-              <span style={{ fontSize: '32px' }}>{layout.icon}</span>
+              <span className="layout-icon">{layout.icon}</span>
               <div>
-                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{layout.name}</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>{layout.description}</div>
+                <div className="layout-name">{layout.name}</div>
+                <div className="layout-description">{layout.description}</div>
               </div>
             </div>
           ))}
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            marginTop: '20px',
-            padding: '10px 20px',
-            backgroundColor: '#e2e8f0',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            width: '100%'
-          }}
-        >
-          Cancel
-        </button>
+        <button onClick={onClose} className="cancel-button">Cancel</button>
+      </div>
+    </div>
+  );
+};
+
+// ========== UPDATED: Custom Message Config Dialog with Dimensions & Bold Controls ==========
+const CustomMessageConfigDialog = ({ isOpen, onClose, onGenerate, initialConfig }) => {
+  // Support for line objects with bold property
+  const [lines, setLines] = useState(initialConfig?.lines || [
+    { text: 'Enter', bold: false },
+    { text: 'Your Message', bold: true },
+    { text: 'Here', bold: false }
+  ]);
+  const [fontSize, setFontSize] = useState(initialConfig?.fontSize || 16);
+  const [borderColor, setBorderColor] = useState(initialConfig?.borderColor || '#000000');
+  const [backgroundColor, setBackgroundColor] = useState(initialConfig?.backgroundColor || '#ffffff');
+  const [stickerCount, setStickerCount] = useState(initialConfig?.stickerCount || 1);
+  const [stickerWidth, setStickerWidth] = useState(initialConfig?.stickerWidth || 61);
+  const [stickerHeight, setStickerHeight] = useState(initialConfig?.stickerHeight || 40.6);
+  const [globalBold, setGlobalBold] = useState(initialConfig?.globalBold || false);
+
+  const addLine = () => setLines([...lines, { text: '', bold: false }]);
+  const removeLine = (index) => {
+    if (lines.length > 1) {
+      const newLines = [...lines];
+      newLines.splice(index, 1);
+      setLines(newLines);
+    }
+  };
+  const updateLineText = (index, value) => {
+    const newLines = [...lines];
+    newLines[index] = { ...newLines[index], text: value };
+    setLines(newLines);
+  };
+  const toggleLineBold = (index) => {
+    const newLines = [...lines];
+    newLines[index] = { ...newLines[index], bold: !newLines[index].bold };
+    setLines(newLines);
+  };
+  
+  const applyGlobalBold = () => {
+    const newBoldState = !globalBold;
+    setGlobalBold(newBoldState);
+    const newLines = lines.map(line => ({ ...line, bold: newBoldState }));
+    setLines(newLines);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="custom-msg-overlay">
+      <div className="custom-msg-dialog">
+        <div className="dialog-header">
+          <h3><FiMessageSquare /> Custom Message Sticker</h3>
+          <button onClick={onClose} className="close-btn">✕</button>
+        </div>
+        
+        {/* Sticker Dimensions Controls */}
+        <div className="dimensions-section">
+          <label><FiMaximize /> Sticker Dimensions (mm)</label>
+          <div className="dimensions-controls">
+            <div className="dimension-input">
+              <span>Width:</span>
+              <input 
+                type="number" 
+                min="40" 
+                max="120" 
+                step="1" 
+                value={stickerWidth} 
+                onChange={(e) => setStickerWidth(Math.max(40, parseFloat(e.target.value) || 61))}
+              />
+              <span>mm</span>
+            </div>
+            <div className="dimension-input">
+              <span>Height:</span>
+              <input 
+                type="number" 
+                min="25" 
+                max="80" 
+                step="1" 
+                value={stickerHeight} 
+                onChange={(e) => setStickerHeight(Math.max(25, parseFloat(e.target.value) || 40.6))}
+              />
+              <span>mm</span>
+            </div>
+          </div>
+        </div>
+        
+        <div className="msg-lines-section">
+          <div className="lines-header">
+            <label>📝 Text Lines</label>
+            <button onClick={applyGlobalBold} className={`global-bold-btn ${globalBold ? 'active' : ''}`}>
+              <FiBold /> {globalBold ? 'Unbold All' : 'Bold All'}
+            </button>
+          </div>
+          <div className="lines-container">
+            {lines.map((line, idx) => (
+              <div key={idx} className="line-input-row">
+                <input
+                  type="text"
+                  value={line.text}
+                  onChange={(e) => updateLineText(idx, e.target.value)}
+                  placeholder={`Line ${idx+1}`}
+                  style={{ fontWeight: line.bold ? 'bold' : 'normal' }}
+                />
+                <button 
+                  onClick={() => toggleLineBold(idx)} 
+                  className={`bold-line-btn ${line.bold ? 'active' : ''}`}
+                  title="Toggle Bold"
+                >
+                  <FiBold />
+                </button>
+                <button onClick={() => removeLine(idx)} className="remove-line-btn">🗑️</button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addLine} className="add-line-btn">+ Add Line</button>
+        </div>
+        
+        <div className="msg-controls">
+          <div className="control-group">
+            <label><FiType /> Font Size: {fontSize}px</label>
+            <div className="font-controls">
+              <button onClick={() => setFontSize(prev => Math.max(8, prev - 2))}><FiMinus /></button>
+              <span>{fontSize}px</span>
+              <button onClick={() => setFontSize(prev => Math.min(98, prev + 2))}><FiPlus /></button>
+            </div>
+          </div>
+          <div className="control-group">
+            <label>Border Color</label>
+            <input type="color" value={borderColor} onChange={(e) => setBorderColor(e.target.value)} />
+          </div>
+          <div className="control-group">
+            <label>Background</label>
+            <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
+          </div>
+          <div className="control-group">
+            <label>Quantity</label>
+            <input type="number" min="1" max="200" value={stickerCount} onChange={(e) => setStickerCount(Math.max(1, parseInt(e.target.value) || 1))} />
+          </div>
+        </div>
+        
+        <div className="preview-section">
+          <label>🔍 Live Preview ({stickerWidth}mm x {stickerHeight}mm)</label>
+          <div className="mini-preview" style={{ transform: 'scale(0.5)', transformOrigin: 'center' }}>
+            <div dangerouslySetInnerHTML={{ __html: CustomMessageSticker({ 
+              messageLines: lines, 
+              fontSizePx: fontSize, 
+              borderColor, 
+              backgroundColor, 
+              stickerIndex: 1,
+              widthMm: stickerWidth,
+              heightMm: stickerHeight
+            }) }} />
+          </div>
+        </div>
+        
+        <div className="dialog-actions">
+          <button onClick={onClose} className="cancel-btn">Cancel</button>
+          <button onClick={() => onGenerate({ 
+            lines, fontSize, borderColor, backgroundColor, stickerCount, 
+            stickerWidth, stickerHeight, globalBold 
+          })} className="generate-btn">
+            Generate {stickerCount} Sticker(s)
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -335,73 +502,30 @@ const StickerPreviewModal = ({ isOpen, onClose, stickers, stickerData, onPrint }
   const currentStickers = stickers.slice(startIdx, startIdx + stickersPerPage);
   
   return (
-    <div className="preview-modal-overlay" style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.8)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10001
-    }}>
-      <div className="preview-modal" style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '20px',
-        maxWidth: '90vw',
-        width: 'auto',
-        maxHeight: '90vh',
-        overflow: 'auto'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+    <div className="preview-modal-overlay">
+      <div className="preview-modal">
+        <div className="preview-header">
           <h3>Sticker Preview ({stickers.length} stickers)</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>✕</button>
+          <button onClick={onClose} className="close-btn">✕</button>
         </div>
         
-        <div className="preview-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-          gap: '16px',
-          marginBottom: '20px',
-          maxHeight: '60vh',
-          overflow: 'auto',
-          padding: '8px'
-        }}>
+        <div className="preview-grid">
           {currentStickers.map((sticker, idx) => (
             <div key={idx} dangerouslySetInnerHTML={{ __html: sticker.html }} />
           ))}
         </div>
         
         {totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '16px' }}>
-            <button
-              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-              disabled={currentPage === 0}
-              style={{ padding: '8px 16px', ...(currentPage === 0 ? { opacity: 0.5 } : {}) }}
-            >
-              Previous
-            </button>
+          <div className="pagination">
+            <button onClick={() => setCurrentPage(p => Math.max(0, p - 1))} disabled={currentPage === 0}>Previous</button>
             <span>Page {currentPage + 1} of {totalPages}</span>
-            <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-              disabled={currentPage === totalPages - 1}
-              style={{ padding: '8px 16px', ...(currentPage === totalPages - 1 ? { opacity: 0.5 } : {}) }}
-            >
-              Next
-            </button>
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))} disabled={currentPage === totalPages - 1}>Next</button>
           </div>
         )}
         
-        <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ padding: '10px 20px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-            Close
-          </button>
-          <button onClick={() => onPrint(stickers.length)} style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-            <FiPrinter /> Print All
-          </button>
+        <div className="preview-actions">
+          <button onClick={onClose} className="close-preview-btn">Close</button>
+          <button onClick={() => onPrint(stickers.length)} className="print-btn"><FiPrinter /> Print All</button>
         </div>
       </div>
     </div>
@@ -432,6 +556,8 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [existingCheck, setExistingCheck] = useState(null);
+  const [showCustomMsgConfig, setShowCustomMsgConfig] = useState(false);
+  const [customMsgData, setCustomMsgData] = useState(null);
   
   const currentYear = new Date().getFullYear();
   
@@ -451,8 +577,6 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
       alert('Please enter a Lot Number');
       return;
     }
-    
-    // Simulate checking if lot exists (you can integrate with your actual API)
     setExistingCheck({ checking: true });
     setTimeout(() => {
       setExistingCheck({ exists: false, message: 'Lot not found in database. You can create manual stickers.' });
@@ -472,7 +596,6 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
       alert('Please enter valid number of stickers');
       return;
     }
-    
     setShowLayoutDialog(true);
   }, [formData]);
   
@@ -490,10 +613,8 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
       const stitchingInitials = getInitialsWithRole(formData.supervisor, 'S');
       const packingInitials = getInitialsWithRole(formData.packingSupervisor, 'P');
       
-      // Generate high-quality barcode image
       const barcodeImage = await ManualStickerGenerator.generateHighQualityBarcode(barcodeId, 350, 90);
       
-      // Generate HTML for each sticker
       const stickers = [];
       for (let i = 1; i <= totalStickers; i++) {
         let html = '';
@@ -556,7 +677,40 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
     }
   }, [formData, totalStickers, currentYear]);
   
-  const handlePrint = useCallback(async (count) => {
+  const handleCustomMessageClick = () => {
+    setShowLayoutDialog(false);
+    setShowCustomMsgConfig(true);
+  };
+  
+  const handleGenerateCustomStickers = useCallback(async ({ lines, fontSize, borderColor, backgroundColor, stickerCount, stickerWidth, stickerHeight }) => {
+    setIsGenerating(true);
+    try {
+      const stickers = [];
+      for (let i = 1; i <= stickerCount; i++) {
+        const html = CustomMessageSticker({ 
+          messageLines: lines, 
+          fontSizePx: fontSize, 
+          borderColor, 
+          backgroundColor, 
+          stickerIndex: stickerCount > 1 ? i : null,
+          widthMm: stickerWidth || 61,
+          heightMm: stickerHeight || 40.6
+        });
+        stickers.push({ id: i, html, type: 'custom' });
+      }
+      setGeneratedStickers(stickers);
+      setCustomMsgData({ lines, fontSize, borderColor, backgroundColor, stickerCount, stickerWidth, stickerHeight });
+      setShowCustomMsgConfig(false);
+      setShowPreviewModal(true);
+    } catch (err) {
+      console.error(err);
+      alert('Error generating custom stickers');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
+  
+  const handlePrint = useCallback((count) => {
     const stickersToPrint = generatedStickers.slice(0, count);
     const printWindow = window.open('', '_blank');
     
@@ -567,7 +721,7 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Print Stickers - Manual - Lot ${formData.lotNumber}</title>
+            <title>Print Stickers - Lot ${formData.lotNumber}</title>
             <meta charset="UTF-8">
             <style>
               * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -576,7 +730,6 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
               @media print {
                 body { background: white; padding: 0; margin: 0; }
                 .sticker-grid > div { break-inside: avoid; page-break-inside: avoid; }
-                @page { size: 61mm 40.6mm; margin: 1mm; }
               }
               img { print-color-adjust: exact; -webkit-print-color-adjust: exact; image-rendering: crisp-edges; }
             </style>
@@ -632,14 +785,15 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
       extraPercentage: formData.extraPercentage,
       totalStickers: totalStickers,
       notes: formData.notes,
-      layout: selectedLayout?.id || 'simple',
+      layout: selectedLayout?.id || (customMsgData ? 'customMessage' : 'simple'),
       generatedDate: new Date().toISOString(),
       generatedBy: currentUser?.username || 'manual',
-      barcodeId: generateBarcodeId(formData.lotNumber, 'A')
+      barcodeId: generateBarcodeId(formData.lotNumber, 'A'),
+      customMessageData: customMsgData || null
     };
     
     onSubmit(manualStickerData);
-  }, [formData, totalStickers, selectedLayout, currentUser, onSubmit]);
+  }, [formData, totalStickers, selectedLayout, customMsgData, currentUser, onSubmit]);
   
   return (
     <div className="manual-sticker-create">
@@ -846,7 +1000,10 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
             Cancel
           </button>
           <button onClick={handleGenerateStickers} className="generate-button" disabled={isGenerating}>
-            {isGenerating ? 'Generating...' : <><FiEye /> Preview Stickers</>}
+            {isGenerating ? 'Generating...' : <><FiEye /> Standard Stickers</>}
+          </button>
+          <button onClick={() => setShowCustomMsgConfig(true)} className="custom-msg-button">
+            <FiMessageSquare /> Custom Message
           </button>
           <button onClick={handleSave} className="save-button" disabled={generatedStickers.length === 0}>
             <FiSave /> Save & Continue
@@ -858,6 +1015,14 @@ export default function ManualStickerCreate({ parties, onBack, onSubmit, current
         isOpen={showLayoutDialog}
         onClose={() => setShowLayoutDialog(false)}
         onSelectLayout={handleLayoutSelect}
+        onSelectCustomMessage={handleCustomMessageClick}
+      />
+      
+      <CustomMessageConfigDialog
+        isOpen={showCustomMsgConfig}
+        onClose={() => setShowCustomMsgConfig(false)}
+        onGenerate={handleGenerateCustomStickers}
+        initialConfig={customMsgData}
       />
       
       {showPreviewModal && (

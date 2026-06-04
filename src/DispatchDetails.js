@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './DispatchDetails.css';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 function DispatchDetails({ updateDispatchStatus, onBack }) {
   const [recentDispatches, setRecentDispatches] = useState([]);
@@ -16,11 +17,17 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   const [endDate, setEndDate] = useState('');
   const [dateFilterType, setDateFilterType] = useState('billDate');
   
+  // Item/Style filter states
+  const [itemSearchTerm, setItemSearchTerm] = useState('');
+  const [itemFilterResults, setItemFilterResults] = useState([]);
+  const [showItemFilterResults, setShowItemFilterResults] = useState(false);
+  
   const [lotSearchTerm, setLotSearchTerm] = useState('');
   const [lotSearchResults, setLotSearchResults] = useState([]);
   const [showLotDetails, setShowLotDetails] = useState(false);
   const [selectedLot, setSelectedLot] = useState(null);
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [generatingExcel, setGeneratingExcel] = useState(false);
 
   const SPREADSHEET_ID = '1s8cXaMtG2XSxdOu1Ecve5aLI2MQcbMjVsn6Sih4hItk';
   const API_KEY = 'AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk';
@@ -199,317 +206,456 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     return [];
   };
 
-  // Generate PDF for Lot Search Results
-const generateLotSearchPDF = (lotNumber, searchResults) => {
-  if (!searchResults || searchResults.length === 0) {
-    alert('No data available to generate PDF for this lot.');
-    return;
-  }
+  // Search items by name/style
+  const searchItemsByName = (searchValue) => {
+    if (!searchValue.trim()) {
+      setItemFilterResults([]);
+      setShowItemFilterResults(false);
+      return [];
+    }
 
-  setGeneratingPDF(true);
-  
-  try {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const leftMargin = 12;
-    const rightMargin = 12;
-    const contentWidth = pageWidth - leftMargin - rightMargin;
+    const results = [];
+    const lowerSearchValue = searchValue.toLowerCase();
 
-    let yPos = 15;
+    recentDispatches.forEach(dispatch => {
+      const matchingItems = dispatch.items.filter(item => 
+        item.description?.toLowerCase().includes(lowerSearchValue) ||
+        item.brand?.toLowerCase().includes(lowerSearchValue) ||
+        item.barcode?.toLowerCase().includes(lowerSearchValue)
+      );
 
-    // Draw page border
-    doc.setLineWidth(0.5);
-    doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
-    doc.setLineWidth(0.3);
-
-    // Main title
-    doc.setFont("times", "bold");
-    doc.setFontSize(18);
-    doc.text("Lot Tracking Report", pageWidth / 2, yPos, { align: "center" });
-    yPos += 8;
-    
-    // Subheading
-    doc.setFontSize(12);
-    doc.setTextColor(70, 70, 200);
-    doc.text(`Lot Number: ${lotNumber}`, pageWidth / 2, yPos, { align: "center" });
-    doc.setTextColor(0, 0, 0);
-    yPos += 8;
-
-    // Summary information box
-    const totalDispatches = searchResults.length;
-    const totalSets = searchResults.reduce((sum, r) => sum + r.totalSets, 0);
-    const totalLoosePcs = searchResults.reduce((sum, r) => sum + r.totalLoosePcs, 0);
-    const totalQuantity = searchResults.reduce((sum, r) => sum + r.totalQuantity, 0);
-    
-    // Summary box
-    const boxHeight = 30;
-    doc.rect(leftMargin, yPos, contentWidth, boxHeight);
-    doc.setFillColor(245, 245, 245);
-    doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
-    
-    doc.setFont("times", "bold");
-    doc.setFontSize(10);
-    doc.text("SUMMARY", leftMargin + 5, yPos + 6);
-    
-    doc.setFontSize(8);
-    const summaryY = yPos + 14;
-    const colWidth = contentWidth / 3;
-    
-    doc.setFont("times", "normal");
-    doc.text("Total Dispatches:", leftMargin + 5, summaryY);
-    doc.setFont("times", "bold");
-    doc.text(totalDispatches.toString(), leftMargin + 40, summaryY);
-    
-    doc.setFont("times", "normal");
-    doc.text("Total Sets:", leftMargin + colWidth + 5, summaryY);
-    doc.setFont("times", "bold");
-    doc.text(totalSets.toString(), leftMargin + colWidth + 35, summaryY);
-    
-    doc.setFont("times", "normal");
-    doc.text("Total Loose Pcs:", leftMargin + (colWidth * 2) + 5, summaryY);
-    doc.setFont("times", "bold");
-    doc.text(totalLoosePcs.toString(), leftMargin + (colWidth * 2) + 40, summaryY);
-    
-    doc.setFont("times", "normal");
-    doc.text("Total Quantity:", leftMargin + 5, summaryY + 8);
-    doc.setFont("times", "bold");
-    doc.text(totalQuantity.toString(), leftMargin + 40, summaryY + 8);
-    
-    yPos += boxHeight + 8;
-
-    // Table Header for Dispatches
-    const tableColumns = [
-      { header: "S.No", width: 10 },
-      { header: "Bill No.", width: 30 },
-      { header: "Party Name", width: 50 },
-      { header: "Bill Date", width: 25 },
-      { header: "Status", width: 20 },
-      { header: "Sets", width: 15 },
-      { header: "Loose", width: 15 },
-      { header: "Total Qty", width: 20 }
-    ];
-
-    doc.setFont("times", "bold");
-    doc.setFontSize(9);
-    doc.setFillColor(240, 240, 240);
-    doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
-    doc.rect(leftMargin, yPos, contentWidth, 8);
-    
-    let currentX = leftMargin;
-    tableColumns.forEach(col => {
-      const textWidth = doc.getTextWidth(col.header);
-      const textX = currentX + (col.width / 2) - (textWidth / 2);
-      doc.text(col.header, textX, yPos + 5.5);
-      currentX += col.width;
-      if (currentX < pageWidth - rightMargin) {
-        doc.line(currentX, yPos, currentX, yPos + 8);
+      if (matchingItems.length > 0) {
+        matchingItems.forEach(item => {
+          results.push({
+            dispatchId: dispatch.id,
+            orderNo: dispatch.orderNo,
+            partyName: dispatch.partyName,
+            billDate: dispatch.billDate,
+            dueDate: dispatch.dueDate,
+            status: dispatch.status,
+            itemDetails: item,
+            dispatchDetails: dispatch
+          });
+        });
       }
     });
-    
-    yPos += 8;
 
-    // Table Rows
-    let itemsProcessed = 0;
-    const colWidths = [10, 30, 50, 25, 20, 15, 15, 20];
+    setItemFilterResults(results);
+    setShowItemFilterResults(results.length > 0);
+    return results;
+  };
+
+  const handleItemSearch = (e) => {
+    const value = e.target.value;
+    setItemSearchTerm(value);
+    if (value.length >= 2) {
+      searchItemsByName(value);
+    } else if (value.length === 0) {
+      setItemFilterResults([]);
+      setShowItemFilterResults(false);
+    }
+  };
+
+  // Export item filter results to Excel
+  const exportItemFilterToExcel = () => {
+    if (itemFilterResults.length === 0) {
+      alert('No data to export. Please search for an item first.');
+      return;
+    }
+
+    setGeneratingExcel(true);
     
-    while (itemsProcessed < searchResults.length) {
-      const result = searchResults[itemsProcessed];
-      const rowHeight = 8;
+    try {
+      const excelData = itemFilterResults.map((result, index) => ({
+        'S.No': index + 1,
+        'Bill Number': result.orderNo,
+        'Party Name': result.partyName,
+        'Bill Date': result.billDate,
+        'Due Date': result.dueDate,
+        'Status': result.status?.toUpperCase() || 'PENDING',
+        'Item Barcode': result.itemDetails.barcode || 'N/A',
+        'Lot Number': result.itemDetails.lotNumber || 'N/A',
+        'Brand': result.itemDetails.brand || 'N/A',
+        'Item Description': result.itemDetails.description || 'N/A',
+        'Sets': result.itemDetails.sets || 0,
+        'Sets Per Piece': result.itemDetails.setsPerPcs || 1,
+        'Loose Pieces': result.itemDetails.loosePcs || 0,
+        'Quantity': result.itemDetails.quantity || 0,
+        'Colors': Array.isArray(result.itemDetails.colors) ? result.itemDetails.colors.join(', ') : (result.itemDetails.colors || '-'),
+        'Sizes': Array.isArray(result.itemDetails.sizes) ? result.itemDetails.sizes.join(', ') : (result.itemDetails.sizes || '-')
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Item Search Results');
       
-      doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+      const fileName = `Item_Search_${itemSearchTerm}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
       
-      let colX = leftMargin;
-      colWidths.forEach(width => {
-        colX += width;
-        if (colX < pageWidth - rightMargin) {
-          doc.line(colX, yPos, colX, yPos + rowHeight);
-        }
+      alert(`Excel file generated successfully! Found ${itemFilterResults.length} item(s) matching "${itemSearchTerm}"`);
+      
+    } catch (error) {
+      console.error("Excel Export Error:", error);
+      alert("Failed to generate Excel file: " + error.message);
+    } finally {
+      setGeneratingExcel(false);
+    }
+  };
+
+  // Export all filtered dispatches to Excel
+  const exportAllToExcel = () => {
+    const filteredData = getFilteredDispatches();
+    
+    if (filteredData.length === 0) {
+      alert('No data available to export.');
+      return;
+    }
+
+    setGeneratingExcel(true);
+    
+    try {
+      const excelData = [];
+      
+      filteredData.forEach(dispatch => {
+        dispatch.items.forEach((item, idx) => {
+          excelData.push({
+            'Bill Number': dispatch.orderNo,
+            'Party Name': dispatch.partyName,
+            'Bill Date': dispatch.billDate,
+            'Due Date': dispatch.dueDate,
+            'Status': dispatch.status?.toUpperCase() || 'PENDING',
+            'Item #': idx + 1,
+            'Barcode': item.barcode || 'N/A',
+            'Lot Number': item.lotNumber || 'N/A',
+            'Brand': item.brand || 'N/A',
+            'Item Description': item.description || 'N/A',
+            'Sets': item.sets || 0,
+            'Sets Per Piece': item.setsPerPcs || 1,
+            'Loose Pieces': item.loosePcs || 0,
+            'Quantity': item.quantity || 0,
+            'Colors': Array.isArray(item.colors) ? item.colors.join(', ') : (item.colors || '-'),
+            'Sizes': Array.isArray(item.sizes) ? item.sizes.join(', ') : (item.sizes || '-'),
+            'Total Bill Quantity': dispatch.totalQuantity,
+            'Total Bill Sets': dispatch.totalSets,
+            'Total Bill Loose': dispatch.totalLoosePcs
+          });
+        });
       });
+      
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Dispatch Data');
+      
+      let fileName = `Dispatch_Export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      alert(`Excel file generated successfully! Exported ${excelData.length} items from ${filteredData.length} bills.`);
+      
+    } catch (error) {
+      console.error("Excel Export Error:", error);
+      alert("Failed to generate Excel file: " + error.message);
+    } finally {
+      setGeneratingExcel(false);
+    }
+  };
 
-      const values = [
-        (itemsProcessed + 1).toString(),
-        (result.orderNo || "").toString(),
-        (result.partyName || "").toString().substring(0, 25),
-        (result.billDate || "").toString(),
-        (result.status || "").toUpperCase(),
-        result.totalSets.toString(),
-        result.totalLoosePcs.toString(),
-        result.totalQuantity.toString()
+  // Generate PDF for Lot Search Results
+  const generateLotSearchPDF = (lotNumber, searchResults) => {
+    if (!searchResults || searchResults.length === 0) {
+      alert('No data available to generate PDF for this lot.');
+      return;
+    }
+
+    setGeneratingPDF(true);
+    
+    try {
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const leftMargin = 12;
+      const rightMargin = 12;
+      const contentWidth = pageWidth - leftMargin - rightMargin;
+
+      let yPos = 15;
+
+      doc.setLineWidth(0.5);
+      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+      doc.setLineWidth(0.3);
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(18);
+      doc.text("Lot Tracking Report", pageWidth / 2, yPos, { align: "center" });
+      yPos += 8;
+      
+      doc.setFontSize(12);
+      doc.setTextColor(70, 70, 200);
+      doc.text(`Lot Number: ${lotNumber}`, pageWidth / 2, yPos, { align: "center" });
+      doc.setTextColor(0, 0, 0);
+      yPos += 8;
+
+      const totalDispatches = searchResults.length;
+      const totalSets = searchResults.reduce((sum, r) => sum + r.totalSets, 0);
+      const totalLoosePcs = searchResults.reduce((sum, r) => sum + r.totalLoosePcs, 0);
+      const totalQuantity = searchResults.reduce((sum, r) => sum + r.totalQuantity, 0);
+      
+      const boxHeight = 30;
+      doc.rect(leftMargin, yPos, contentWidth, boxHeight);
+      doc.setFillColor(245, 245, 245);
+      doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(10);
+      doc.text("SUMMARY", leftMargin + 5, yPos + 6);
+      
+      doc.setFontSize(8);
+      const summaryY = yPos + 14;
+      const colWidth = contentWidth / 3;
+      
+      doc.setFont("times", "normal");
+      doc.text("Total Dispatches:", leftMargin + 5, summaryY);
+      doc.setFont("times", "bold");
+      doc.text(totalDispatches.toString(), leftMargin + 40, summaryY);
+      
+      doc.setFont("times", "normal");
+      doc.text("Total Sets:", leftMargin + colWidth + 5, summaryY);
+      doc.setFont("times", "bold");
+      doc.text(totalSets.toString(), leftMargin + colWidth + 35, summaryY);
+      
+      doc.setFont("times", "normal");
+      doc.text("Total Loose Pcs:", leftMargin + (colWidth * 2) + 5, summaryY);
+      doc.setFont("times", "bold");
+      doc.text(totalLoosePcs.toString(), leftMargin + (colWidth * 2) + 40, summaryY);
+      
+      doc.setFont("times", "normal");
+      doc.text("Total Quantity:", leftMargin + 5, summaryY + 8);
+      doc.setFont("times", "bold");
+      doc.text(totalQuantity.toString(), leftMargin + 40, summaryY + 8);
+      
+      yPos += boxHeight + 8;
+
+      const tableColumns = [
+        { header: "S.No", width: 10 },
+        { header: "Bill No.", width: 30 },
+        { header: "Party Name", width: 50 },
+        { header: "Bill Date", width: 25 },
+        { header: "Status", width: 20 },
+        { header: "Sets", width: 15 },
+        { header: "Loose", width: 15 },
+        { header: "Total Qty", width: 20 }
       ];
 
-      let textX = leftMargin;
-      values.forEach((value, colIndex) => {
-        const textWidth = doc.getTextWidth(value);
-        const textXPos = textX + (colWidths[colIndex] / 2) - (textWidth / 2);
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
+      doc.setFillColor(240, 240, 240);
+      doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
+      doc.rect(leftMargin, yPos, contentWidth, 8);
+      
+      let currentX = leftMargin;
+      tableColumns.forEach(col => {
+        const textWidth = doc.getTextWidth(col.header);
+        const textX = currentX + (col.width / 2) - (textWidth / 2);
+        doc.text(col.header, textX, yPos + 5.5);
+        currentX += col.width;
+        if (currentX < pageWidth - rightMargin) {
+          doc.line(currentX, yPos, currentX, yPos + 8);
+        }
+      });
+      
+      yPos += 8;
+
+      let itemsProcessed = 0;
+      const colWidths = [10, 30, 50, 25, 20, 15, 15, 20];
+      
+      while (itemsProcessed < searchResults.length) {
+        const result = searchResults[itemsProcessed];
+        const rowHeight = 8;
         
-        if (colIndex === 4 || colIndex === 7) {
+        doc.rect(leftMargin, yPos, contentWidth, rowHeight);
+        
+        let colX = leftMargin;
+        colWidths.forEach(width => {
+          colX += width;
+          if (colX < pageWidth - rightMargin) {
+            doc.line(colX, yPos, colX, yPos + rowHeight);
+          }
+        });
+
+        const values = [
+          (itemsProcessed + 1).toString(),
+          (result.orderNo || "").toString(),
+          (result.partyName || "").toString().substring(0, 25),
+          (result.billDate || "").toString(),
+          (result.status || "").toUpperCase(),
+          result.totalSets.toString(),
+          result.totalLoosePcs.toString(),
+          result.totalQuantity.toString()
+        ];
+
+        let textX = leftMargin;
+        values.forEach((value, colIndex) => {
+          const textWidth = doc.getTextWidth(value);
+          const textXPos = textX + (colWidths[colIndex] / 2) - (textWidth / 2);
+          
+          if (colIndex === 4 || colIndex === 7) {
+            doc.setFont("times", "bold");
+            doc.setFontSize(9);
+          } else {
+            doc.setFont("times", "normal");
+            doc.setFontSize(8);
+          }
+          doc.text(value, textXPos, yPos + 5.5);
+          
+          textX += colWidths[colIndex];
+        });
+
+        yPos += rowHeight;
+        itemsProcessed++;
+        
+        if (yPos > pageHeight - 55 && itemsProcessed < searchResults.length) {
+          doc.addPage();
+          yPos = 15;
+          
+          doc.setLineWidth(0.5);
+          doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+          doc.setLineWidth(0.3);
+          
+          doc.setFont("times", "bold");
+          doc.setFontSize(18);
+          doc.text("Lot Tracking Report", pageWidth / 2, yPos, { align: "center" });
+          yPos += 8;
+          
+          doc.setFontSize(12);
+          doc.setTextColor(70, 70, 200);
+          doc.text(`Lot Number: ${lotNumber} (Continued)`, pageWidth / 2, yPos, { align: "center" });
+          doc.setTextColor(0, 0, 0);
+          yPos += 10;
+          
           doc.setFont("times", "bold");
           doc.setFontSize(9);
-        } else {
-          doc.setFont("times", "normal");
-          doc.setFontSize(8);
+          doc.setFillColor(240, 240, 240);
+          doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
+          doc.rect(leftMargin, yPos, contentWidth, 8);
+          
+          currentX = leftMargin;
+          tableColumns.forEach(col => {
+            const textWidth = doc.getTextWidth(col.header);
+            const textX = currentX + (col.width / 2) - (textWidth / 2);
+            doc.text(col.header, textX, yPos + 5.5);
+            currentX += col.width;
+            if (currentX < pageWidth - rightMargin) {
+              doc.line(currentX, yPos, currentX, yPos + 8);
+            }
+          });
+          
+          yPos += 8;
         }
-        doc.text(value, textXPos, yPos + 5.5);
-        
-        textX += colWidths[colIndex];
-      });
-
-      yPos += rowHeight;
-      itemsProcessed++;
+      }
       
-      // Check for new page
-      if (yPos > pageHeight - 55 && itemsProcessed < searchResults.length) {
-        doc.addPage();
-        yPos = 15;
+      if (searchResults.length > 0) {
+        const totalRowHeight = 8;
         
-        // Redraw border and header on new page
-        doc.setLineWidth(0.5);
-        doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
-        doc.setLineWidth(0.3);
+        doc.setFillColor(245, 245, 245);
+        doc.rect(leftMargin, yPos, contentWidth, totalRowHeight, 'F');
+        doc.rect(leftMargin, yPos, contentWidth, totalRowHeight);
         
-        doc.setFont("times", "bold");
-        doc.setFontSize(18);
-        doc.text("Lot Tracking Report", pageWidth / 2, yPos, { align: "center" });
-        yPos += 8;
-        
-        doc.setFontSize(12);
-        doc.setTextColor(70, 70, 200);
-        doc.text(`Lot Number: ${lotNumber} (Continued)`, pageWidth / 2, yPos, { align: "center" });
-        doc.setTextColor(0, 0, 0);
-        yPos += 10;
-        
-        // Redraw table header
-        doc.setFont("times", "bold");
-        doc.setFontSize(9);
-        doc.setFillColor(240, 240, 240);
-        doc.rect(leftMargin, yPos, contentWidth, 8, 'F');
-        doc.rect(leftMargin, yPos, contentWidth, 8);
-        
-        currentX = leftMargin;
-        tableColumns.forEach(col => {
-          const textWidth = doc.getTextWidth(col.header);
-          const textX = currentX + (col.width / 2) - (textWidth / 2);
-          doc.text(col.header, textX, yPos + 5.5);
-          currentX += col.width;
-          if (currentX < pageWidth - rightMargin) {
-            doc.line(currentX, yPos, currentX, yPos + 8);
+        let colX = leftMargin;
+        colWidths.forEach(width => {
+          colX += width;
+          if (colX < pageWidth - rightMargin) {
+            doc.line(colX, yPos, colX, yPos + totalRowHeight);
           }
         });
         
-        yPos += 8;
+        const totalValues = [
+          "",
+          "TOTAL",
+          "",
+          "",
+          "",
+          totalSets.toString(),
+          totalLoosePcs.toString(),
+          totalQuantity.toString()
+        ];
+        
+        let textX = leftMargin;
+        totalValues.forEach((value, colIndex) => {
+          const textWidth = doc.getTextWidth(value);
+          const textXPos = textX + (colWidths[colIndex] / 2) - (textWidth / 2);
+          
+          doc.setFont("times", "bold");
+          doc.setFontSize(10);
+          doc.text(value, textXPos, yPos + 5.5);
+          
+          textX += colWidths[colIndex];
+        });
+        
+        yPos += totalRowHeight;
       }
-    }
-    
-    // Draw Total Row
-    if (searchResults.length > 0) {
-      const totalRowHeight = 8;
       
-      doc.setFillColor(245, 245, 245);
-      doc.rect(leftMargin, yPos, contentWidth, totalRowHeight, 'F');
-      doc.rect(leftMargin, yPos, contentWidth, totalRowHeight);
+      yPos += 3;
+      doc.setLineWidth(0.5);
+      doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
       
-      let colX = leftMargin;
-      colWidths.forEach(width => {
-        colX += width;
-        if (colX < pageWidth - rightMargin) {
-          doc.line(colX, yPos, colX, yPos + totalRowHeight);
-        }
-      });
+      const footerY = pageHeight - 22;
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
+      doc.setLineWidth(0.3);
       
-      const totalValues = [
-        "",
-        "TOTAL",
-        "",
-        "",
-        "",
-        totalSets.toString(),
-        totalLoosePcs.toString(),
-        totalQuantity.toString()
-      ];
+      const sectionWidth = (contentWidth - 20) / 4;
+      let sigX = leftMargin;
       
-      let textX = leftMargin;
-      totalValues.forEach((value, colIndex) => {
-        const textWidth = doc.getTextWidth(value);
-        const textXPos = textX + (colWidths[colIndex] / 2) - (textWidth / 2);
-        
-        doc.setFont("times", "bold");
-        doc.setFontSize(10);
-        doc.text(value, textXPos, yPos + 5.5);
-        
-        textX += colWidths[colIndex];
-      });
-      
-      yPos += totalRowHeight;
-    }
-    
-    // Footer line
-    yPos += 3;
-    doc.setLineWidth(0.5);
-    doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
-    
-    // Signatures
-    const footerY = pageHeight - 22;
-    doc.setFont("times", "bold");
-    doc.setFontSize(9);
-    doc.setLineWidth(0.3);
-    
-    const sectionWidth = (contentWidth - 20) / 4;
-    let sigX = leftMargin;
-    
-    doc.text("Prepared By", sigX + 5, footerY);
-    doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
-    doc.setFontSize(8);
-    doc.text("System", sigX + 5, footerY + 8);
-    
-    sigX += sectionWidth;
-    doc.setFontSize(9);
-    doc.text("Verified By", sigX + 5, footerY);
-    doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
-    doc.setFontSize(8);
-    doc.text("(Name & Signature)", sigX + 5, footerY + 8);
-    
-    sigX += sectionWidth;
-    doc.setFontSize(9);
-    doc.text("Checked By", sigX + 5, footerY);
-    doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
-    doc.setFontSize(8);
-    doc.text("(Name & Signature)", sigX + 5, footerY + 8);
-    
-    sigX += sectionWidth;
-    doc.setFontSize(9);
-    doc.text("Authorized Signatory", sigX + 5, footerY);
-    doc.line(sigX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
-    doc.setFontSize(8);
-    doc.text("(Name & Signature)", sigX + 5, footerY + 8);
-    
-    // Page numbers
-    const totalPages = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
+      doc.text("Prepared By", sigX + 5, footerY);
+      doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
       doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(
-        `Page ${i} of ${totalPages}`,
-        pageWidth / 2,
-        pageHeight - 10,
-        { align: "center" }
-      );
-      doc.setTextColor(0, 0, 0);
-    }
+      doc.text("System", sigX + 5, footerY + 8);
+      
+      sigX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Verified By", sigX + 5, footerY);
+      doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", sigX + 5, footerY + 8);
+      
+      sigX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Checked By", sigX + 5, footerY);
+      doc.line(sigX + 5, footerY + 3, sigX + sectionWidth - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", sigX + 5, footerY + 8);
+      
+      sigX += sectionWidth;
+      doc.setFontSize(9);
+      doc.text("Authorized Signatory", sigX + 5, footerY);
+      doc.line(sigX + 5, footerY + 3, pageWidth - rightMargin - 5, footerY + 3);
+      doc.setFontSize(8);
+      doc.text("(Name & Signature)", sigX + 5, footerY + 8);
+      
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(
+          `Page ${i} of ${totalPages}`,
+          pageWidth / 2,
+          pageHeight - 10,
+          { align: "center" }
+        );
+        doc.setTextColor(0, 0, 0);
+      }
 
-    const fileName = `Lot_Tracking_${lotNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
-    
-    alert(`Lot tracking PDF generated successfully for ${lotNumber}!`);
-    
-  } catch (error) {
-    console.error("PDF Generation Error:", error);
-    alert("Failed to generate PDF: " + error.message);
-  } finally {
-    setGeneratingPDF(false);
-  }
-};
+      const fileName = `Lot_Tracking_${lotNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+      
+      alert(`Lot tracking PDF generated successfully for ${lotNumber}!`);
+      
+    } catch (error) {
+      console.error("PDF Generation Error:", error);
+      alert("Failed to generate PDF: " + error.message);
+    } finally {
+      setGeneratingPDF(false);
+    }
+  };
+
   // Generate Individual Packing List PDF
   const generateBillPDF = async (dispatch) => {
     setGeneratingPDF(true);
@@ -522,7 +668,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
       const rightMargin = 12;
       const contentWidth = pageWidth - leftMargin - rightMargin;
 
-      // Calculate totals safely
       const uniqueLots = new Set(dispatch.items.map(item => item.lotNumber)).size;
       const totalItems = dispatch.items.length;
       const totalQuantity = dispatch.totalQuantity;
@@ -545,25 +690,21 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
 
       let yPos = 15;
 
-      // Draw page border
       doc.setLineWidth(0.5);
       doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
       doc.setLineWidth(0.3);
 
-      // Main title
       doc.setFont("times", "bold");
       doc.setFontSize(16);
       doc.text("Packing List", pageWidth / 2, yPos, { align: "center" });
       yPos += 6.5;
       
-      // Subheading
       doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
       doc.text("PACKING LIST FOR ACCOUNT OFFICE", pageWidth / 2, yPos, { align: "center" });
       doc.setTextColor(0, 0, 0);
       yPos += 8;
 
-      // Party name
       const partyName = dispatch.partyName || 'N/A';
       doc.setFont("times", "bold");
       doc.setFontSize(18);
@@ -594,14 +735,12 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
         yPos += 6;
       }
       
-      // Main information box
       const boxHeight = 42;
       doc.rect(leftMargin, yPos, contentWidth, boxHeight);
       
       const midPoint = leftMargin + (contentWidth / 2);
       doc.line(midPoint, yPos, midPoint, yPos + boxHeight);
 
-      // LEFT SIDE
       const leftLabelX = leftMargin + 5;
       const leftValueX = leftMargin + 40;
       
@@ -645,7 +784,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
       const materialsText = materialParts.length > 0 ? materialParts.join(', ') : 'None';
       doc.text(materialsText.substring(0, 30), leftValueX, yPos + 35);
 
-      // RIGHT SIDE
       const rightLabelX = midPoint + 5;
       const rightValueX = midPoint + 38;
       
@@ -685,7 +823,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
 
       yPos += boxHeight + 6;
 
-      // Table Header
       const tableColumns = [
         { header: "S.No", width: 10 },
         { header: "Lot Number", width: 22 },
@@ -717,7 +854,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
       
       yPos += 8;
 
-      // Table Rows
       let itemsProcessed = 0;
       while (itemsProcessed < dispatch.items.length) {
         const item = dispatch.items[itemsProcessed];
@@ -833,7 +969,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
         }
       }
       
-      // Draw Total Row
       if (dispatch.items.length > 0) {
         const totalRowHeight = 8;
         
@@ -877,12 +1012,10 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
         yPos += totalRowHeight;
       }
       
-      // Footer line
       yPos += 3;
       doc.setLineWidth(0.5);
       doc.line(leftMargin, yPos, leftMargin + contentWidth, yPos);
       
-      // Signatures
       const footerY = pageHeight - 22;
       doc.setFont("times", "bold");
       doc.setFontSize(9);
@@ -918,7 +1051,6 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
       doc.setFontSize(8);
       doc.text("(Name & Signature)", sigX + 5, footerY + 8);
       
-      // Page numbers
       const totalPages = doc.internal.getNumberOfPages();
       for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
@@ -933,13 +1065,12 @@ const generateLotSearchPDF = (lotNumber, searchResults) => {
         doc.setTextColor(0, 0, 0);
       }
 
-    // Create a safe party name (remove special characters and spaces)
-const safePartyName = (dispatch.partyName || 'Unknown')
-  .replace(/[^a-zA-Z0-9]/g, '_')
-  .substring(0, 30);
+      const safePartyName = (dispatch.partyName || 'Unknown')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .substring(0, 30);
 
-const fileName = `PackingList_${dispatch.orderNo}_${safePartyName}_${new Date().toISOString().split('T')[0]}.pdf`;
-doc.save(fileName);
+      const fileName = `PackingList_${dispatch.orderNo}_${safePartyName}_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
       
       alert(`PDF generated successfully for ${dispatch.orderNo}!`);
       
@@ -1037,7 +1168,6 @@ doc.save(fileName);
       alternateRowStyles: { fillColor: [255, 255, 255] },
       margin: { left: 10, right: 10, bottom: 20 },
       didDrawPage: (data) => {
-        const pageCount = doc.internal.getNumberOfPages();
         doc.setFontSize(8);
         doc.setTextColor(0, 0, 0);
         const str = 'Page ' + doc.internal.getCurrentPageInfo().pageNumber;
@@ -1170,6 +1300,9 @@ doc.save(fileName);
     setStartDate('');
     setEndDate('');
     setDateFilterType('billDate');
+    setItemSearchTerm('');
+    setItemFilterResults([]);
+    setShowItemFilterResults(false);
   };
 
   const stats = {
@@ -1370,12 +1503,220 @@ doc.save(fileName);
                   <span>📊</span>
                   Download Sales Register
                 </button>
+                <button 
+                  onClick={exportAllToExcel}
+                  disabled={generatingExcel}
+                  className="dispatch-modern-excel-btn"
+                  style={{
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span>📊</span>
+                  {generatingExcel ? 'Exporting...' : 'Export to Excel'}
+                </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* Lot Number Tracking */}
+        {/* Item/Style Name Search Section */}
+        <div className="dispatch-modern-item-search-section">
+          <div className="dispatch-modern-section-header">
+            <div className="dispatch-modern-section-title">
+              <span>🏷️</span>
+              <h3>Item Name / Style Search</h3>
+            </div>
+            <p className="dispatch-modern-section-desc">Search for specific items across all dispatches (e.g., tracksuit, shirt, jeans, etc.)</p>
+          </div>
+          
+          <div className="dispatch-modern-item-search-container">
+            <div className="dispatch-modern-search-wrapper">
+              <span className="dispatch-modern-search-icon">🔍</span>
+              <input
+                type="text"
+                placeholder="Enter item name, style, or description (e.g., tracksuit, cotton shirt, denim)..."
+                value={itemSearchTerm}
+                onChange={handleItemSearch}
+                className="dispatch-modern-item-input"
+              />
+              {itemSearchTerm && (
+                <button className="dispatch-modern-clear-btn" onClick={() => {
+                  setItemSearchTerm('');
+                  setItemFilterResults([]);
+                  setShowItemFilterResults(false);
+                }}>
+                  ✕
+                </button>
+              )}
+            </div>
+            
+            {itemSearchTerm && showItemFilterResults && (
+              <div className="dispatch-modern-item-results-header">
+                <div className="dispatch-modern-item-summary">
+                  <span className="dispatch-modern-found-count">
+                    📋 Found {itemFilterResults.length} item(s) matching "{itemSearchTerm}"
+                  </span>
+                  <button 
+                    onClick={exportItemFilterToExcel}
+                    disabled={generatingExcel}
+                    className="dispatch-modern-excel-export-btn"
+                    style={{
+                      background: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>📊</span>
+                    {generatingExcel ? 'Exporting...' : 'Export to Excel'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Item Search Results Display */}
+          {showItemFilterResults && itemFilterResults.length > 0 && (
+            <div className="dispatch-modern-item-results">
+              <div className="dispatch-modern-item-cards">
+                {itemFilterResults.map((result, idx) => (
+                  <div key={idx} className="dispatch-modern-item-card">
+                    <div className="dispatch-modern-item-card-header">
+                      <div className="dispatch-modern-item-card-info">
+                        <span className="dispatch-modern-bill-no">🧾 Bill: {result.orderNo}</span>
+                        <span className="dispatch-modern-party-name">👤 Party: {result.partyName}</span>
+                        <span className="dispatch-modern-date">📅 Date: {result.billDate}</span>
+                      </div>
+                      <span className={`dispatch-modern-status-badge dispatch-modern-status-${result.status}`}>
+                        {result.status === 'pending' && '⏰'}
+                        {result.status === 'active' && '🚚'}
+                        {result.status === 'completed' && '✓'}
+                        {result.status}
+                      </span>
+                    </div>
+                    
+                    <div className="dispatch-modern-item-details">
+                      <div className="dispatch-modern-item-property">
+                        <label>Item Description:</label>
+                        <strong>{result.itemDetails.description}</strong>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Lot Number:</label>
+                        <span>{result.itemDetails.lotNumber}</span>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Brand:</label>
+                        <span>{result.itemDetails.brand}</span>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Barcode:</label>
+                        <code>{result.itemDetails.barcode}</code>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Quantity:</label>
+                        <span className="dispatch-modern-quantity">{result.itemDetails.quantity} pcs</span>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Sets:</label>
+                        <span>{result.itemDetails.sets}</span>
+                      </div>
+                      <div className="dispatch-modern-item-property">
+                        <label>Loose Pcs:</label>
+                        <span>{result.itemDetails.loosePcs}</span>
+                      </div>
+                      {result.itemDetails.colors && result.itemDetails.colors.length > 0 && (
+                        <div className="dispatch-modern-item-property">
+                          <label>Colors:</label>
+                          <div className="dispatch-modern-tags">
+                            {result.itemDetails.colors.map((color, i) => (
+                              <span key={i} className="dispatch-modern-color-tag">{color}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {result.itemDetails.sizes && result.itemDetails.sizes.length > 0 && (
+                        <div className="dispatch-modern-item-property">
+                          <label>Sizes:</label>
+                          <div className="dispatch-modern-tags">
+                            {result.itemDetails.sizes.map((size, i) => (
+                              <span key={i} className="dispatch-modern-size-tag">{size}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="dispatch-modern-item-actions">
+                      <button
+                        onClick={() => {
+                          const dispatch = recentDispatches.find(d => d.id === result.dispatchId);
+                          if (dispatch) generateBillPDF(dispatch);
+                        }}
+                        disabled={generatingPDF}
+                        className="dispatch-modern-pdf-small-btn"
+                        style={{
+                          background: '#2563eb',
+                          color: 'white',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <span>📄</span>
+                        Generate Packing List
+                      </button>
+                      <button
+                        onClick={() => setExpandedBill(result.dispatchId)}
+                        className="dispatch-modern-view-details-btn"
+                        style={{
+                          background: '#6b7280',
+                          color: 'white',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px'
+                        }}
+                      >
+                        View Full Bill
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {showItemFilterResults && itemFilterResults.length === 0 && itemSearchTerm && (
+            <div className="dispatch-modern-no-results">
+              <span>🔍</span>
+              <p>No items found matching "<strong>{itemSearchTerm}</strong>"</p>
+              <p className="dispatch-modern-no-results-hint">Try searching with different keywords like brand name, product type, or description</p>
+            </div>
+          )}
+        </div>
+
+        {/* Lot Number Tracking Section */}
         <div className="dispatch-modern-lot-section">
           <div className="dispatch-modern-section-header">
             <div className="dispatch-modern-section-title">
@@ -1405,140 +1746,135 @@ doc.save(fileName);
             )}
           </div>
 
-  {showLotDetails && (
-  <div className="dispatch-modern-lot-results">
-    {lotSearchResults.length > 0 ? (
-      <>
-        <div className="dispatch-modern-lot-summary">
-          <div className="dispatch-modern-summary-header">
-            <span className="dispatch-modern-found-count">📋 {lotSearchResults.length} Dispatch(es) Found</span>
-            <span className="dispatch-modern-lot-highlight">Lot: {lotSearchTerm}</span>
-            <button 
-              onClick={() => generateLotSearchPDF(lotSearchTerm, lotSearchResults)}
-              disabled={generatingPDF}
-              className="dispatch-modern-pdf-download-btn"
-              style={{
-                background: '#dc2626',
-                color: 'white',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                marginLeft: 'auto'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
-              onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
-            >
-              <span>📄</span>
-              {generatingPDF ? 'Generating...' : 'Download PDF Report'}
-            </button>
-          </div>
-          <div className="dispatch-modern-lot-totals">
-            <div className="dispatch-modern-lot-total">
-              <span className="dispatch-modern-total-label">Total Sets</span>
-              <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalSets, 0)}</strong>
-            </div>
-            <div className="dispatch-modern-lot-total">
-              <span className="dispatch-modern-total-label">Total Loose Pcs</span>
-              <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalLoosePcs, 0)}</strong>
-            </div>
-            <div className="dispatch-modern-lot-total">
-              <span className="dispatch-modern-total-label">Total Quantity</span>
-              <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalQuantity, 0)}</strong>
-            </div>
-          </div>
-        </div>
+          {showLotDetails && (
+            <div className="dispatch-modern-lot-results">
+              {lotSearchResults.length > 0 ? (
+                <>
+                  <div className="dispatch-modern-lot-summary">
+                    <div className="dispatch-modern-summary-header">
+                      <span className="dispatch-modern-found-count">📋 {lotSearchResults.length} Dispatch(es) Found</span>
+                      <span className="dispatch-modern-lot-highlight">Lot: {lotSearchTerm}</span>
+                      <button 
+                        onClick={() => generateLotSearchPDF(lotSearchTerm, lotSearchResults)}
+                        disabled={generatingPDF}
+                        className="dispatch-modern-pdf-download-btn"
+                        style={{
+                          background: '#dc2626',
+                          color: 'white',
+                          border: 'none',
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          marginLeft: 'auto'
+                        }}
+                      >
+                        <span>📄</span>
+                        {generatingPDF ? 'Generating...' : 'Download PDF Report'}
+                      </button>
+                    </div>
+                    <div className="dispatch-modern-lot-totals">
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Sets</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalSets, 0)}</strong>
+                      </div>
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Loose Pcs</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalLoosePcs, 0)}</strong>
+                      </div>
+                      <div className="dispatch-modern-lot-total">
+                        <span className="dispatch-modern-total-label">Total Quantity</span>
+                        <strong>{lotSearchResults.reduce((sum, r) => sum + r.totalQuantity, 0)}</strong>
+                      </div>
+                    </div>
+                  </div>
 
-        {/* Individual Result Cards - THIS WAS MISSING */}
-        {lotSearchResults.map((result, idx) => (
-          <div key={idx} className="dispatch-modern-lot-card">
-            <div className="dispatch-modern-lot-card-header">
-              <div className="dispatch-modern-lot-card-info">
-                <span className="dispatch-modern-bill-no">🧾 {result.orderNo}</span>
-                <span className="dispatch-modern-party-name">👤 {result.partyName}</span>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span className={`dispatch-modern-status-badge dispatch-modern-status-${result.status}`}>
-                  {result.status === 'pending' && '⏰'}
-                  {result.status === 'active' && '🚚'}
-                  {result.status === 'completed' && '✓'}
-                  {result.status}
-                </span>
-                <button
-                  onClick={() => generateBillPDF(recentDispatches.find(d => d.id === result.dispatchId))}
-                  disabled={generatingPDF}
-                  style={{
-                    background: '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
-                >
-                  <span>📄</span>
-                  {generatingPDF ? '...' : 'PDF'}
-                </button>
-              </div>
-            </div>
-            
-            <div className="dispatch-modern-lot-table-wrapper">
-              <table className="dispatch-modern-lot-table">
-                <thead>
-                  <tr>
-                    <th>Barcode</th>
-                    <th>Lot Number</th>
-                    <th>Brand</th>
-                    <th>Description</th>
-                    <th>Sets</th>
-                    <th>Loose Pcs</th>
-                    <th>Quantity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.items.map((item, itemIdx) => (
-                    <tr key={itemIdx}>
-                      <td><code>{item.barcode}</code></td>
-                      <td><strong>{item.lotNumber}</strong></td>
-                      <td>{item.brand}</td>
-                      <td>{item.description}</td>
-                      <td>{parseFloat(item.sets) || 0}</td>
-                      <td>{parseFloat(item.loosePcs) || 0}</td>
-                      <td className="dispatch-modern-quantity-cell">{parseFloat(item.quantity) || 0}</td>
-                    </tr>
+                  {lotSearchResults.map((result, idx) => (
+                    <div key={idx} className="dispatch-modern-lot-card">
+                      <div className="dispatch-modern-lot-card-header">
+                        <div className="dispatch-modern-lot-card-info">
+                          <span className="dispatch-modern-bill-no">🧾 {result.orderNo}</span>
+                          <span className="dispatch-modern-party-name">👤 {result.partyName}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <span className={`dispatch-modern-status-badge dispatch-modern-status-${result.status}`}>
+                            {result.status === 'pending' && '⏰'}
+                            {result.status === 'active' && '🚚'}
+                            {result.status === 'completed' && '✓'}
+                            {result.status}
+                          </span>
+                          <button
+                            onClick={() => generateBillPDF(recentDispatches.find(d => d.id === result.dispatchId))}
+                            disabled={generatingPDF}
+                            style={{
+                              background: '#2563eb',
+                              color: 'white',
+                              border: 'none',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '10px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span>📄</span>
+                            {generatingPDF ? '...' : 'PDF'}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="dispatch-modern-lot-table-wrapper">
+                        <table className="dispatch-modern-lot-table">
+                          <thead>
+                            <tr>
+                              <th>Barcode</th>
+                              <th>Lot Number</th>
+                              <th>Brand</th>
+                              <th>Description</th>
+                              <th>Sets</th>
+                              <th>Loose Pcs</th>
+                              <th>Quantity</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {result.items.map((item, itemIdx) => (
+                              <tr key={itemIdx}>
+                                <td><code>{item.barcode}</code></td>
+                                <td><strong>{item.lotNumber}</strong></td>
+                                <td>{item.brand}</td>
+                                <td>{item.description}</td>
+                                <td>{parseFloat(item.sets) || 0}</td>
+                                <td>{parseFloat(item.loosePcs) || 0}</td>
+                                <td className="dispatch-modern-quantity-cell">{parseFloat(item.quantity) || 0}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td colSpan="4" className="dispatch-modern-total-label">Totals:</td>
+                              <td className="dispatch-modern-total-value">{result.totalSets}</td>
+                              <td className="dispatch-modern-total-value">{result.totalLoosePcs}</td>
+                              <td className="dispatch-modern-total-value">{result.totalQuantity}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan="4" className="dispatch-modern-total-label">Totals:</td>
-                    <td className="dispatch-modern-total-value">{result.totalSets}</td>
-                    <td className="dispatch-modern-total-value">{result.totalLoosePcs}</td>
-                    <td className="dispatch-modern-total-value">{result.totalQuantity}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                </>
+              ) : (
+                <div className="dispatch-modern-no-results">
+                  <span>🔍</span>
+                  <p>No dispatches found with lot number: <strong>{lotSearchTerm}</strong></p>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-      </>
-    ) : (
-      <div className="dispatch-modern-no-results">
-        <span>🔍</span>
-        <p>No dispatches found with lot number: <strong>{lotSearchTerm}</strong></p>
-      </div>
-    )}
-  </div>
-)}
+          )}
         </div>
 
         {/* Filters Section */}
@@ -1576,10 +1912,33 @@ doc.save(fileName);
               );
             })}
           </div>
+          
+          {/* Export All Button */}
+          <button 
+            onClick={exportAllToExcel}
+            disabled={generatingExcel}
+            className="dispatch-modern-export-all-btn"
+            style={{
+              background: '#10b981',
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginLeft: 'auto'
+            }}
+          >
+            <span>📊</span>
+            {generatingExcel ? 'Exporting...' : 'Export All to Excel'}
+          </button>
         </div>
 
         {/* Active Filters Display */}
-        {(startDate || endDate || searchTerm || statusFilter !== 'all') && (
+        {(startDate || endDate || searchTerm || statusFilter !== 'all' || itemSearchTerm) && (
           <div className="dispatch-modern-active-filters">
             <span className="dispatch-modern-active-filters-label">Active Filters:</span>
             {(startDate || endDate) && (
@@ -1600,6 +1959,16 @@ doc.save(fileName);
               <span className="dispatch-modern-filter-tag">
                 {statusFilter === 'pending' ? '⏰' : statusFilter === 'active' ? '🚚' : '✓'} Status: {statusFilter}
                 <button onClick={() => setStatusFilter('all')} className="dispatch-modern-remove-filter">×</button>
+              </span>
+            )}
+            {itemSearchTerm && (
+              <span className="dispatch-modern-filter-tag">
+                🏷️ Item Search: {itemSearchTerm}
+                <button onClick={() => {
+                  setItemSearchTerm('');
+                  setItemFilterResults([]);
+                  setShowItemFilterResults(false);
+                }} className="dispatch-modern-remove-filter">×</button>
               </span>
             )}
             <button 

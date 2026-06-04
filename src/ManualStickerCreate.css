@@ -19,6 +19,499 @@
   position: relative;
   overflow: hidden;
 }
+/* ========== ADD THESE STYLES TO YOUR EXISTING CSS FILE ========== */
+
+/* Custom Message Dialog Styles */
+.custom-msg-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10002;
+}
+
+.custom-msg-dialog {
+  background-color: white;
+  border-radius: 20px;
+  padding: 24px;
+  max-width: 550px;
+  width: 90%;
+  max-height: 85vh;
+  overflow: auto;
+  box-shadow: 0 20px 35px rgba(0, 0, 0, 0.2);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.dialog-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.close-btn:hover {
+  color: #0f172a;
+}
+
+/* Message Lines Section */
+.msg-lines-section {
+  margin-bottom: 20px;
+}
+
+.msg-lines-section label {
+  font-weight: bold;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.lines-container {
+  max-height: 250px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.line-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.line-input-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.line-input-row input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.remove-line-btn {
+  background: #fee2e2;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: #b91c1c;
+}
+
+.remove-line-btn:hover {
+  background: #fecaca;
+}
+
+.add-line-btn {
+  margin-top: 8px;
+  background: #f1f5f9;
+  border: 1px dashed #3b82f6;
+  border-radius: 20px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.add-line-btn:hover {
+  background: #e0f2fe;
+}
+
+/* Controls Section */
+.msg-controls {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.control-group {
+  flex: 1;
+  min-width: 100px;
+}
+
+.control-group label {
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.font-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.font-controls button {
+  background: #e2e8f0;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.font-controls button:hover {
+  background: #cbd5e1;
+}
+
+.font-controls span {
+  min-width: 45px;
+  text-align: center;
+  font-weight: bold;
+}
+
+.control-group input[type="color"] {
+  width: 60px;
+  height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.control-group input[type="number"] {
+  width: 80px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+/* Preview Section */
+.preview-section {
+  margin-bottom: 20px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.preview-section label {
+  font-weight: bold;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.mini-preview {
+  display: flex;
+  justify-content: center;
+  transform: scale(0.7);
+  transform-origin: center;
+  pointer-events: none;
+}
+
+/* Dialog Actions */
+.dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.cancel-btn {
+  padding: 10px 20px;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background: #cbd5e1;
+}
+
+.generate-btn {
+  padding: 10px 20px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.generate-btn:hover {
+  background: #2563eb;
+}
+
+/* Custom Message Button in Form Actions */
+.custom-msg-button {
+  padding: 12px 24px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.custom-msg-button:hover {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
+/* Layout Dialog Additional Styles (if not already present) */
+.layout-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.layout-option {
+  padding: 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.layout-option:hover {
+  border-color: #3b82f6;
+  background: #f8fafc;
+}
+
+.layout-icon {
+  font-size: 32px;
+}
+
+.layout-name {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.layout-description {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* Preview Modal Styles (if not already present) */
+.preview-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.preview-modal {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 90vw;
+  width: auto;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.pagination button {
+  padding: 8px 16px;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
+.close-preview-btn {
+  padding: 10px 20px;
+  background-color: #e2e8f0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+/* Dimensions Section */
+.dimensions-section {
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dimensions-section label {
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dimensions-controls {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.dimension-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dimension-input span {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.dimension-input input {
+  width: 70px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* Lines Header with Bold All button */
+.lines-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.global-bold-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.global-bold-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+/* Bold line button */
+.bold-line-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.bold-line-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.bold-line-btn:hover {
+  background: #e2e8f0;
+}
+
+/* Update line-input-row to accommodate bold button */
+.line-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.line-input-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.print-btn {
+  padding: 10px 20px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.print-btn:hover {
+  background-color: #2563eb;
+}
 
 .manual-sticker-header::before {
   content: '';
