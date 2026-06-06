@@ -1038,6 +1038,62 @@
   flex-direction: column;
   gap: 4px;
 }
+/* Back Button Styles */
+.dispatch-modern-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.dispatch-modern-back-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  transform: translateX(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dispatch-modern-back-btn:active {
+  transform: translateX(-1px);
+}
+
+.dispatch-modern-back-icon {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* Adjust header layout to accommodate back button */
+.dispatch-modern-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.dispatch-modern-header-left {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.dispatch-modern-title-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
 
 .dispatch-modern-item-property label {
   font-size: 11px;

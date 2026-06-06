@@ -4,7 +4,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
-function DispatchDetails({ updateDispatchStatus, onBack }) {
+function ManagementDispatchDetail({ updateDispatchStatus, onBack }) {
   const [recentDispatches, setRecentDispatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,31 +37,6 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     fetchDispatchData();
   }, []);
 
-  // Function to filter bills from last 3 days (including today)
-  const filterLastThreeDaysIncludingToday = (dispatches) => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
-    
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(today.getDate() - 3);
-    threeDaysAgo.setHours(0, 0, 0, 0); // Start of the day 3 days ago
-    
-    return dispatches.filter(dispatch => {
-      if (!dispatch.billDate) return false;
-      
-      try {
-        const billDate = new Date(dispatch.billDate);
-        billDate.setHours(12, 0, 0, 0); // Set to noon to avoid timezone issues
-        
-        // Check if bill date is within last 3 days (including today)
-        return billDate >= threeDaysAgo && billDate <= today;
-      } catch (e) {
-        console.error('Error parsing date for filtering:', e);
-        return false;
-      }
-    });
-  };
-
   const fetchDispatchData = async () => {
     try {
       setLoading(true);
@@ -73,14 +48,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       
       if (data.values && data.values.length > 0) {
         const dispatches = transformSheetData(data.values);
-        // Filter to only show last 3 days (including today)
-        const lastThreeDaysDispatches = filterLastThreeDaysIncludingToday(dispatches);
-        setRecentDispatches(lastThreeDaysDispatches);
-        
-        // Optional: Show console log if bills are filtered out
-        if (dispatches.length > 0 && lastThreeDaysDispatches.length === 0) {
-          console.log('No bills found from the last 3 days (including today)');
-        }
+        setRecentDispatches(dispatches);
       } else {
         setRecentDispatches([]);
       }
@@ -1379,7 +1347,8 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   return (
     <div className="dispatch-modern-container">
       <div className="dispatch-modern-wrapper">
-     
+        {/* Header Section */}
+     {/* Header Section */}
 <div className="dispatch-modern-header">
   <div className="dispatch-modern-header-left">
     <button 
@@ -1395,25 +1364,20 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       <div>
         <h1 className="dispatch-modern-title">Dispatch Management</h1>
         <p className="dispatch-modern-subtitle">Track and manage all your dispatches in one place</p>
-        {recentDispatches.length > 0 && (
-          <p className="dispatch-modern-info-badge" style={{ fontSize: '12px', color: '#059669', marginTop: '4px' }}>
-            📅 Showing bills from last 3 days (including today)
-          </p>
-        )}
       </div>
     </div>
   </div>
 </div>
 
         {/* Stats Dashboard */}
-        {/* <div className="dispatch-modern-stats-grid">
+        <div className="dispatch-modern-stats-grid">
           <div className="dispatch-modern-stat-card">
             <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-blue">
               <span>📄</span>
             </div>
             <div className="dispatch-modern-stat-info">
               <span className="dispatch-modern-stat-value">{stats.total}</span>
-              <span className="dispatch-modern-stat-label">Total Bills (Last 3 Days)</span>
+              <span className="dispatch-modern-stat-label">Total Bills</span>
             </div>
           </div>
           <div className="dispatch-modern-stat-card">
@@ -1443,11 +1407,38 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
               <span className="dispatch-modern-stat-label">Completed</span>
             </div>
           </div>
-        </div> */}
+        </div>
 
         {/* Enhanced Metrics */}
         <div className="dispatch-modern-metrics">
-          {/* Optional metrics - kept as is */}
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">📊</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalItems}</div>
+              <div className="dispatch-modern-metric-label">Total Items</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">📦</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalQuantity}</div>
+              <div className="dispatch-modern-metric-label">Total Quantity</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">🔢</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalSets}</div>
+              <div className="dispatch-modern-metric-label">Total Sets</div>
+            </div>
+          </div>
+          <div className="dispatch-modern-metric-item">
+            <span className="dispatch-modern-metric-icon">🔧</span>
+            <div>
+              <div className="dispatch-modern-metric-value">{stats.totalLoosePcs}</div>
+              <div className="dispatch-modern-metric-label">Loose Pieces</div>
+            </div>
+          </div>
         </div>
 
         {/* Date Range Filter Section */}
@@ -1926,7 +1917,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
           </div>
           
           {/* Export All Button */}
-          {/* <button 
+          <button 
             onClick={exportAllToExcel}
             disabled={generatingExcel}
             className="dispatch-modern-export-all-btn"
@@ -1946,7 +1937,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
           >
             <span>📊</span>
             {generatingExcel ? 'Exporting...' : 'Export All to Excel'}
-          </button> */}
+          </button>
         </div>
 
         {/* Active Filters Display */}
@@ -2252,7 +2243,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
                         ? `No bills found for the selected date range` 
                         : searchTerm 
                         ? `No results matching "${searchTerm}"` 
-                        : "No bills found from the last 3 days (including today)"}
+                        : "Create your first packing copy to get started!"}
                     </p>
                     {(startDate || endDate) && (
                       <button onClick={() => { setStartDate(''); setEndDate(''); }} className="dispatch-modern-btn-primary">
@@ -2270,4 +2261,4 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   );
 }
 
-export default DispatchDetails;
+export default ManagementDispatchDetail;

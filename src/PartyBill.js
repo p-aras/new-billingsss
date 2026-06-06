@@ -1,5 +1,6 @@
 // PartyBill.js - Blue & White Theme with Traditional Layout
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom'; // Add this import
 import "./PartyBill.css";
 
 // Import jsPDF directly (not dynamically)
@@ -78,6 +79,7 @@ const PartyBill = ({ parties, bills, selectedParty, onSubmit, onBack, currentUse
 const [tempBillDataForDraft, setTempBillDataForDraft] = useState(null);
 const [isEditingExistingDraft, setIsEditingExistingDraft] = useState(false);
 const [existingDraftNumber, setExistingDraftNumber] = useState(null);
+const navigate = useNavigate();
 
   
   // On-screen keyboard state
@@ -2313,7 +2315,15 @@ const getParentLotNumber = (lotNumber) => {
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isScannerActive]);
+  useEffect(() => {
+  // If onBack prop is provided, use it
+  if (onBack) {
+    return;
+  }
   
+  // Otherwise, set up a custom handler for the dashboard button
+  // The dashboard button is already calling onBack, but we need to ensure it navigates
+}, [onBack]);
   useEffect(() => {
     if (!isModalOpen) {
       setLotSearchTerm("");
@@ -2322,6 +2332,40 @@ const getParentLotNumber = (lotNumber) => {
       setManualLotInput("");
     }
   }, [isModalOpen]);
+   useEffect(() => {
+    // First check if selectedParty prop is provided directly
+    if (selectedParty) {
+      setSelectedPartyState(selectedParty);
+      setBillForm(prev => ({ 
+        ...prev, 
+        partyName: selectedParty.name 
+      }));
+      addDebugMessage(`Party loaded from props: ${selectedParty.name}`, 'success');
+      return;
+    }
+    
+    // If no prop, try to read from localStorage (set by PartySelection)
+    const storedParty = localStorage.getItem('selectedParty');
+    if (storedParty) {
+      try {
+        const party = JSON.parse(storedParty);
+        setSelectedPartyState(party);
+        setBillForm(prev => ({ 
+          ...prev, 
+          partyName: party.name 
+        }));
+        addDebugMessage(`Party loaded from localStorage: ${party.name}`, 'success');
+        
+        // Optional: Clear it after reading to avoid stale data on refresh
+        // localStorage.removeItem('selectedParty');
+      } catch (error) {
+        console.error("Error parsing stored party:", error);
+        addDebugMessage(`Failed to parse stored party: ${error.message}`, 'error');
+      }
+    } else {
+      addDebugMessage(`No party found in localStorage or props`, 'warning');
+    }
+  }, [selectedParty]);
 
   useEffect(() => {
     const newQuantity = calculateTotalQuantity(
@@ -4289,7 +4333,13 @@ const ConfirmationModal = () => {
         <div className="blue-actions">
           <button onClick={testScanner} className="blue-btn blue-btn-outline">🔍 Test Scanner</button>
           <button onClick={refreshSheetData} className="blue-btn blue-btn-outline" disabled={loading}>🔄 {loading ? "Loading..." : "Refresh"}</button>
-          <button onClick={onBack} className="blue-btn blue-btn-secondary">← Dashboard</button>
+         <button onClick={() => {
+  if (onBack) {
+    onBack();
+  } else {
+    navigate('/');
+  }
+}} className="blue-btn blue-btn-secondary">← Dashboard</button>
         </div>
       </div>
 

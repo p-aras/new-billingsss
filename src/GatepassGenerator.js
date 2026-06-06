@@ -1,4 +1,4 @@
-// GatepassGenerator.js
+// GatepassGenerator.js - Fixed version with proper null checks
 import React, { useState, useEffect } from 'react';
 import './GatepassGenerator.css';
 import jsPDF from 'jspdf';
@@ -15,7 +15,7 @@ const GOOGLE_SHEETS_CONFIG = {
 // Apps Script Web App URL for sending emails
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxL5iwsTonjFTHTsy1VO0VO-KWTOM9n6eDrfztclMIjb8mPZc2TBsJD1AHcueZOv0LN/exec';
 
-const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
+const GatepassGenerator = ({ parties = [], gatepasses = [], onSubmit, onBack }) => {
   const [gatepassData, setGatepassData] = useState({
     vehicleNumber: '',
     driverName: '',
@@ -59,6 +59,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
 
   // Function to check if any bill has byHandQuantity or byPorter selected
   const hasAnyByHandSelection = () => {
+    if (!gatepassData.selectedBills || !Array.isArray(gatepassData.selectedBills)) return false;
     return gatepassData.selectedBills.some(bill => 
       bill.additionalDetails?.isByHand === true
     );
@@ -66,7 +67,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
 
   // Function to check if all bills are by-hand (no vehicle needed)
   const isAllByHand = () => {
-    if (gatepassData.selectedBills.length === 0) return false;
+    if (!gatepassData.selectedBills || !Array.isArray(gatepassData.selectedBills) || gatepassData.selectedBills.length === 0) return false;
     return gatepassData.selectedBills.every(bill => 
       bill.additionalDetails?.isByHand === true
     );
@@ -98,7 +99,8 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
 
   // Function to check if a bill is selected
   const isBillSelected = (billNumber) => {
-    return gatepassData.selectedBills.some(selected => selected['Bill Number'] === billNumber);
+    if (!gatepassData.selectedBills || !Array.isArray(gatepassData.selectedBills)) return false;
+    return gatepassData.selectedBills.some(selected => selected && selected['Bill Number'] === billNumber);
   };
 
   const fetchBillsFromSheet = async () => {
@@ -154,14 +156,14 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
         });
         
         const sortedBills = sortBills(availableBills, sortOrder);
-        setBills(sortedBills);
+        setBills(sortedBills || []);
         
-        const uniqueParties = [...new Set(availableBills.map(bill => bill['Party Name']).filter(name => name))];
+        const uniqueParties = [...new Set((availableBills || []).map(bill => bill['Party Name']).filter(name => name))];
         setUniquePartiesList(uniqueParties);
         
-        console.log('Available bills fetched:', availableBills.length);
+        console.log('Available bills fetched:', availableBills ? availableBills.length : 0);
         
-        if (availableBills.length === 0) {
+        if (availableBills && availableBills.length === 0) {
           alert('All bills have already been assigned to gatepasses. No available bills found.');
         }
       } else {
@@ -176,6 +178,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   };
 
   const sortBills = (billsArray, order) => {
+    if (!billsArray || !Array.isArray(billsArray)) return [];
     return [...billsArray].sort((a, b) => {
       const billNumA = a['Bill Number'] || '';
       const billNumB = b['Bill Number'] || '';
@@ -189,6 +192,8 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   };
 
   const applyFilters = (billsToFilter) => {
+    if (!billsToFilter || !Array.isArray(billsToFilter)) return [];
+    
     let filtered = [...billsToFilter];
     
     if (filterParty) {
@@ -251,7 +256,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   }, []);
 
   useEffect(() => {
-    if (bills.length > 0) {
+    if (bills && bills.length > 0) {
       const filteredAndSorted = applyFilters(bills);
       setBills(filteredAndSorted);
     }
@@ -406,6 +411,10 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   };
 
   const calculateTotalsFromBills = (selectedBills) => {
+    if (!selectedBills || !Array.isArray(selectedBills)) {
+      return { totalPetti: 0, totalBora: 0, totalPolybags: 0 };
+    }
+    
     const totals = {
       totalPetti: 0,
       totalBora: 0,
@@ -600,11 +609,13 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   };
 
   const getUniqueParties = () => {
+    if (!gatepassData.selectedBills || !Array.isArray(gatepassData.selectedBills)) return [];
     const parties = gatepassData.selectedBills.map(bill => bill['Party Name']);
     return [...new Set(parties)];
   };
 
   const getUniquePartyInitials = () => {
+    if (!gatepassData.selectedBills || !Array.isArray(gatepassData.selectedBills)) return [];
     const initials = gatepassData.selectedBills.map(bill => 
       getPartyInitials(bill['Party Name'])
     );
@@ -650,7 +661,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
     
     y += 6;
 
-    const isByHandOnly = isAllByHand();
+    const isByHandOnly = gatepassInfo.isByHandOnly || false;
 
     doc.rect(10, y, 90, 40);
     doc.setFont("times", "bold");
@@ -823,64 +834,66 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
       return 0;
     };
     
-    gatepassInfo.selectedBills.forEach((bill, index) => {
-      if (y + rowHeight > pageHeight - 50) {
-        doc.addPage();
-        y = 20;
+    if (gatepassInfo.selectedBills && Array.isArray(gatepassInfo.selectedBills)) {
+      gatepassInfo.selectedBills.forEach((bill, index) => {
+        if (y + rowHeight > pageHeight - 50) {
+          doc.addPage();
+          y = 20;
+          
+          doc.setFillColor(200, 200, 200);
+          doc.rect(tableStartX, y, tableWidth, 12, 'F');
+          doc.setFont("times", "bold");
+          doc.setFontSize(10);
+          doc.text("#", colPositions.serial, y + 8);
+          doc.text("Bill No.", colPositions.billNo, y + 8);
+          doc.text("Bill Date", colPositions.billDate, y + 8);
+          doc.text("Total Qty", colPositions.totalQty, y + 8);
+          doc.text("Party", colPositions.partyInitials, y + 8);
+          doc.text("Petti | Bora | Polybags", colPositions.packing, y + 8);
+          y += 12;
+          doc.setFont("times", "normal");
+          doc.setFontSize(9);
+        }
         
-        doc.setFillColor(200, 200, 200);
-        doc.rect(tableStartX, y, tableWidth, 12, 'F');
-        doc.setFont("times", "bold");
-        doc.setFontSize(10);
-        doc.text("#", colPositions.serial, y + 8);
-        doc.text("Bill No.", colPositions.billNo, y + 8);
-        doc.text("Bill Date", colPositions.billDate, y + 8);
-        doc.text("Total Qty", colPositions.totalQty, y + 8);
-        doc.text("Party", colPositions.partyInitials, y + 8);
-        doc.text("Petti | Bora | Polybags", colPositions.packing, y + 8);
-        y += 12;
-        doc.setFont("times", "normal");
-        doc.setFontSize(9);
-      }
-      
-      doc.rect(tableStartX, y, tableWidth, rowHeight);
-      
-      const partyInitials = bill['Party Initials'] || getPartyInitials(bill['Party Name']);
-      
-      const billDate = bill["Bill Date"] || "-";
-      const formattedBillDate = billDate.split('T')[0];
-      
-      const totalQuantity = getTotalQuantity(bill);
-      
-      const petti = bill.additionalDetails?.totalPetti || 0;
-      const bora = bill.additionalDetails?.totalBora || 0;
-      const polybags = bill.additionalDetails?.totalPolybags || 0;
-      
-      let packingText = "";
-      const packingParts = [];
-      if (petti > 0) packingParts.push(`${petti} Petti`);
-      if (bora > 0) packingParts.push(`${bora} Bora`);
-      if (polybags > 0) packingParts.push(`${polybags} Polybags`);
-      packingText = packingParts.join(" | ");
-      
-      if (packingText.length > 30) {
-        packingText = packingText.substring(0, 27) + "...";
-      }
-      
-      const textY = y + 7;
-      
-      doc.text(String(index + 1), colPositions.serial, textY);
-      doc.text(bill["Bill Number"] || "-", colPositions.billNo, textY);
-      doc.text(formattedBillDate, colPositions.billDate, textY);
-      doc.text(String(totalQuantity), colPositions.totalQty, textY);
-      doc.text(partyInitials, colPositions.partyInitials, textY);
-      doc.text(packingText || "0", colPositions.packing, textY);
-      
-      y += rowHeight;
-    });
+        doc.rect(tableStartX, y, tableWidth, rowHeight);
+        
+        const partyInitials = bill['Party Initials'] || getPartyInitials(bill['Party Name']);
+        
+        const billDate = bill["Bill Date"] || "-";
+        const formattedBillDate = billDate.split('T')[0];
+        
+        const totalQuantity = getTotalQuantity(bill);
+        
+        const petti = bill.additionalDetails?.totalPetti || 0;
+        const bora = bill.additionalDetails?.totalBora || 0;
+        const polybags = bill.additionalDetails?.totalPolybags || 0;
+        
+        let packingText = "";
+        const packingParts = [];
+        if (petti > 0) packingParts.push(`${petti} Petti`);
+        if (bora > 0) packingParts.push(`${bora} Bora`);
+        if (polybags > 0) packingParts.push(`${polybags} Polybags`);
+        packingText = packingParts.join(" | ");
+        
+        if (packingText.length > 30) {
+          packingText = packingText.substring(0, 27) + "...";
+        }
+        
+        const textY = y + 7;
+        
+        doc.text(String(index + 1), colPositions.serial, textY);
+        doc.text(bill["Bill Number"] || "-", colPositions.billNo, textY);
+        doc.text(formattedBillDate, colPositions.billDate, textY);
+        doc.text(String(totalQuantity), colPositions.totalQty, textY);
+        doc.text(partyInitials, colPositions.partyInitials, textY);
+        doc.text(packingText || "0", colPositions.packing, textY);
+        
+        y += rowHeight;
+      });
+    }
 
     const tableEndY = y;
-    const tableStartY = y - (gatepassInfo.selectedBills.length * rowHeight);
+    const tableStartY = y - ((gatepassInfo.selectedBills && gatepassInfo.selectedBills.length) || 0) * rowHeight;
     
     doc.line(colPositions.serial - 5, tableStartY, colPositions.serial - 5, tableEndY);
     doc.line(colPositions.billNo - 5, tableStartY, colPositions.billNo - 5, tableEndY);
@@ -897,47 +910,49 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
     doc.text("HANDLING DETAILS", 10, y);
     y += 8;
 
-    gatepassInfo.selectedBills.forEach((bill, index) => {
-      if (bill.additionalDetails && bill.additionalDetails.isByHand) {
-        const details = bill.additionalDetails;
-        const hasDetails = details.byHandQuantity > 0 || details.byPorter;
-        
-        if (hasDetails) {
-          if (y + 30 > pageHeight - 30) {
-            doc.addPage();
-            y = 20;
-          }
+    if (gatepassInfo.selectedBills && Array.isArray(gatepassInfo.selectedBills)) {
+      gatepassInfo.selectedBills.forEach((bill, index) => {
+        if (bill.additionalDetails && bill.additionalDetails.isByHand) {
+          const details = bill.additionalDetails;
+          const hasDetails = details.byHandQuantity > 0 || details.byPorter;
           
-          doc.setFont("times", "bold");
-          doc.setFontSize(10);
-          doc.text(`Bill ${bill['Bill Number']}:`, 10, y);
-          y += 5;
-          
-          doc.setFont("times", "normal");
-          doc.setFontSize(9);
-          
-          let detailsText = [];
-          if (details.byHandQuantity > 0) {
-            detailsText.push(`By Hand Quantity: ${details.byHandQuantity}${details.byHandPersonName ? ` (Person: ${details.byHandPersonName})` : ''}`);
-          }
-          if (details.byPorter) detailsText.push(`Porter Required: Yes`);
-          
-          if (detailsText.length > 0) {
-            const detailsString = detailsText.join(" | ");
-            const wrappedDetails = doc.splitTextToSize(detailsString, 180);
-            doc.text(wrappedDetails, 15, y);
-            y += 8 * wrappedDetails.length;
+          if (hasDetails) {
+            if (y + 30 > pageHeight - 30) {
+              doc.addPage();
+              y = 20;
+            }
+            
+            doc.setFont("times", "bold");
+            doc.setFontSize(10);
+            doc.text(`Bill ${bill['Bill Number']}:`, 10, y);
+            y += 5;
+            
+            doc.setFont("times", "normal");
+            doc.setFontSize(9);
+            
+            let detailsText = [];
+            if (details.byHandQuantity > 0) {
+              detailsText.push(`By Hand Quantity: ${details.byHandQuantity}${details.byHandPersonName ? ` (Person: ${details.byHandPersonName})` : ''}`);
+            }
+            if (details.byPorter) detailsText.push(`Porter Required: Yes`);
+            
+            if (detailsText.length > 0) {
+              const detailsString = detailsText.join(" | ");
+              const wrappedDetails = doc.splitTextToSize(detailsString, 180);
+              doc.text(wrappedDetails, 15, y);
+              y += 8 * wrappedDetails.length;
+            }
           }
         }
-      }
-    });
+      });
+    }
 
     y += 4;
 
     doc.setFont("times", "bold");
     doc.setFontSize(11);
     
-    doc.text(`Total Bills: ${gatepassInfo.selectedBills.length}`, 10, y);
+    doc.text(`Total Bills: ${gatepassInfo.selectedBills ? gatepassInfo.selectedBills.length : 0}`, 10, y);
     y += 7;
     
     const uniquePartyInitials = getUniquePartyInitials();
@@ -1029,7 +1044,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (gatepassData.selectedBills.length === 0) {
+    if (!gatepassData.selectedBills || gatepassData.selectedBills.length === 0) {
       alert('Please select at least one bill for the gatepass');
       return;
     }
@@ -1105,7 +1120,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
     }, 2000);
   };
 
-  const filteredBills = applyFilters(bills);
+  const filteredBills = bills ? applyFilters(bills) : [];
   const vehicleDetailsRequired = areVehicleDetailsRequired();
   const allByHand = isAllByHand();
 
@@ -1114,9 +1129,9 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
       {/* Header */}
       <header className="generator-header">
         <div className="header-left">
-          <button className="back-button" onClick={onBack}>
-            ← Back
-          </button>
+         <button className="back-button" onClick={() => window.history.back()}>
+  ← Back
+</button>
           <div className="header-info">
             <h1>Dispatch Gatepass</h1>
             <p>Create consolidated gatepass for multiple bills</p>
@@ -1124,7 +1139,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
         </div>
         <div className="header-right">
           <div className="stats-card">
-            <span className="stats-number">{gatepasses.length}</span>
+            <span className="stats-number">{gatepasses ? gatepasses.length : 0}</span>
             <span className="stats-label">Total Gatepasses</span>
           </div>
         </div>
@@ -1206,7 +1221,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
                 <div className="spinner"></div>
                 <p>Loading bills...</p>
               </div>
-            ) : filteredBills.length === 0 ? (
+            ) : !filteredBills || filteredBills.length === 0 ? (
               <div className="empty-state">
                 <p>{searchTerm || filterParty ? 'No matching bills found with current filters' : 'No bills available'}</p>
                 {(searchTerm || filterParty) && (
@@ -1218,7 +1233,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
             ) : (
               <>
                 <div className="bills-count-info">
-                  Showing {filteredBills.length} of {bills.length} bills
+                  Showing {filteredBills.length} of {bills ? bills.length : 0} bills
                   {sortOrder === 'desc' && <span className="sort-indicator">↓ Sorted by Bill Number (Newest First)</span>}
                   {sortOrder === 'asc' && <span className="sort-indicator">↑ Sorted by Bill Number (Oldest First)</span>}
                 </div>
@@ -1258,16 +1273,16 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
             <div className="summary-header">
               <h3>
                 <span className="icon">✅</span>
-                Selected Bills ({gatepassData.selectedBills.length})
+                Selected Bills ({gatepassData.selectedBills ? gatepassData.selectedBills.length : 0})
               </h3>
-              {gatepassData.selectedBills.length > 0 && (
+              {gatepassData.selectedBills && gatepassData.selectedBills.length > 0 && (
                 <button className="clear-button" onClick={handleClearAllBills}>
                   Clear All
                 </button>
               )}
             </div>
 
-            {gatepassData.selectedBills.length === 0 ? (
+            {!gatepassData.selectedBills || gatepassData.selectedBills.length === 0 ? (
               <div className="empty-selection">
                 <div className="empty-icon">📄</div>
                 <p>No bills selected</p>
@@ -1320,7 +1335,7 @@ const GatepassGenerator = ({ parties, gatepasses, onSubmit, onBack }) => {
           </div>
 
           {/* Gatepass Form */}
-          {gatepassData.selectedBills.length > 0 && (
+          {gatepassData.selectedBills && gatepassData.selectedBills.length > 0 && (
             <form onSubmit={handleSubmit} className="gatepass-form">
               {/* Show warning banner for by-hand only gatepass */}
               {allByHand && (

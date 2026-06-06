@@ -4,7 +4,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
-function DispatchDetails({ updateDispatchStatus, onBack }) {
+function TodayDispatchDetail({ updateDispatchStatus, onBack }) {
   const [recentDispatches, setRecentDispatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,29 +37,8 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     fetchDispatchData();
   }, []);
 
-  // Function to filter bills from last 3 days (including today)
-  const filterLastThreeDaysIncludingToday = (dispatches) => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
-    
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(today.getDate() - 3);
-    threeDaysAgo.setHours(0, 0, 0, 0); // Start of the day 3 days ago
-    
-    return dispatches.filter(dispatch => {
-      if (!dispatch.billDate) return false;
-      
-      try {
-        const billDate = new Date(dispatch.billDate);
-        billDate.setHours(12, 0, 0, 0); // Set to noon to avoid timezone issues
-        
-        // Check if bill date is within last 3 days (including today)
-        return billDate >= threeDaysAgo && billDate <= today;
-      } catch (e) {
-        console.error('Error parsing date for filtering:', e);
-        return false;
-      }
-    });
+  const handleBackNavigation = () => {
+    window.history.back();
   };
 
   const fetchDispatchData = async () => {
@@ -73,14 +52,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       
       if (data.values && data.values.length > 0) {
         const dispatches = transformSheetData(data.values);
-        // Filter to only show last 3 days (including today)
-        const lastThreeDaysDispatches = filterLastThreeDaysIncludingToday(dispatches);
-        setRecentDispatches(lastThreeDaysDispatches);
-        
-        // Optional: Show console log if bills are filtered out
-        if (dispatches.length > 0 && lastThreeDaysDispatches.length === 0) {
-          console.log('No bills found from the last 3 days (including today)');
-        }
+        setRecentDispatches(dispatches);
       } else {
         setRecentDispatches([]);
       }
@@ -238,45 +210,75 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     return [];
   };
 
-  // Search items by name/style
-  const searchItemsByName = (searchValue) => {
-    if (!searchValue.trim()) {
-      setItemFilterResults([]);
-      setShowItemFilterResults(false);
-      return [];
-    }
-
-    const results = [];
-    const lowerSearchValue = searchValue.toLowerCase();
-
-    recentDispatches.forEach(dispatch => {
-      const matchingItems = dispatch.items.filter(item => 
-        item.description?.toLowerCase().includes(lowerSearchValue) ||
-        item.brand?.toLowerCase().includes(lowerSearchValue) ||
-        item.barcode?.toLowerCase().includes(lowerSearchValue)
-      );
-
-      if (matchingItems.length > 0) {
-        matchingItems.forEach(item => {
-          results.push({
-            dispatchId: dispatch.id,
-            orderNo: dispatch.orderNo,
-            partyName: dispatch.partyName,
-            billDate: dispatch.billDate,
-            dueDate: dispatch.dueDate,
-            status: dispatch.status,
-            itemDetails: item,
-            dispatchDetails: dispatch
-          });
-        });
+  // Helper function to check if a date is today
+  const isToday = (dateString) => {
+    if (!dateString) return false;
+    
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      let billDate = new Date(dateString);
+      billDate.setHours(0, 0, 0, 0);
+      
+      // Handle different date formats
+      if (isNaN(billDate.getTime())) {
+        // Try parsing as YYYY-MM-DD format
+        const parts = dateString.split('-');
+        if (parts.length === 3) {
+          billDate = new Date(parts[0], parts[1] - 1, parts[2]);
+          billDate.setHours(0, 0, 0, 0);
+        }
       }
-    });
-
-    setItemFilterResults(results);
-    setShowItemFilterResults(results.length > 0);
-    return results;
+      
+      if (isNaN(billDate.getTime())) return false;
+      
+      return billDate.getTime() === today.getTime();
+    } catch (error) {
+      console.error('Error checking date:', error);
+      return false;
+    }
   };
 
+
+const searchItemsByName = (searchValue) => {
+  if (!searchValue.trim()) {
+    setItemFilterResults([]);
+    setShowItemFilterResults(false);
+    return [];
+  }
+
+  const results = [];
+  const lowerSearchValue = searchValue.toLowerCase();
+
+  // Search in ALL dispatches (removed today's filter)
+  recentDispatches.forEach(dispatch => {
+    const matchingItems = dispatch.items.filter(item => 
+      item.description?.toLowerCase().includes(lowerSearchValue) ||
+      item.brand?.toLowerCase().includes(lowerSearchValue) ||
+      item.barcode?.toLowerCase().includes(lowerSearchValue)
+    );
+
+    if (matchingItems.length > 0) {
+      matchingItems.forEach(item => {
+        results.push({
+          dispatchId: dispatch.id,
+          orderNo: dispatch.orderNo,
+          partyName: dispatch.partyName,
+          billDate: dispatch.billDate,
+          dueDate: dispatch.dueDate,
+          status: dispatch.status,
+          itemDetails: item,
+          dispatchDetails: dispatch
+        });
+      });
+    }
+  });
+
+  setItemFilterResults(results);
+  setShowItemFilterResults(results.length > 0);
+  return results;
+};
   const handleItemSearch = (e) => {
     const value = e.target.value;
     setItemSearchTerm(value);
@@ -376,9 +378,9 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       
       const ws = XLSX.utils.json_to_sheet(excelData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Dispatch Data');
+      XLSX.utils.book_append_sheet(wb, ws, 'Today Dispatch Data');
       
-      let fileName = `Dispatch_Export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      let fileName = `Today_Dispatch_${new Date().toISOString().split('T')[0]}.xlsx`;
       XLSX.writeFile(wb, fileName);
       alert(`Excel file generated successfully! Exported ${excelData.length} items from ${filteredData.length} bills.`);
       
@@ -1141,7 +1143,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     doc.setFontSize(10);
     let dateText = startDate 
       ? `For ${new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}`
-      : 'All Time';
+      : 'Today\'s Dispatch';
     doc.text(dateText, pageWidth / 2, 34, { align: 'center' });
 
     const tableData = filteredData.map((dispatch) => {
@@ -1207,51 +1209,52 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
       }
     });
 
-    doc.save(`Sales_Register_${startDate || 'All'}_to_${endDate || 'All'}.pdf`);
+    doc.save(`Sales_Register_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  const searchLotNumber = (lotNumber) => {
-    if (!lotNumber.trim()) {
-      setLotSearchResults([]);
-      setShowLotDetails(false);
-      return;
+const searchLotNumber = (lotNumber) => {
+  if (!lotNumber.trim()) {
+    setLotSearchResults([]);
+    setShowLotDetails(false);
+    return;
+  }
+
+  const results = [];
+  const lowerLotNumber = lotNumber.toLowerCase();
+
+  // Search in ALL dispatches (removed today's filter)
+  recentDispatches.forEach(dispatch => {
+    const matchingItems = dispatch.items.filter(item => 
+      item.lotNumber?.toLowerCase().includes(lowerLotNumber)
+    );
+
+    if (matchingItems.length > 0) {
+      const totalSetsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.sets) || 0), 0);
+      const totalLoosePcsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.loosePcs) || 0), 0);
+      const totalQuantityForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+
+      results.push({
+        dispatchId: dispatch.id,
+        orderNo: dispatch.orderNo,
+        partyName: dispatch.partyName,
+        status: dispatch.status,
+        billDate: dispatch.billDate,
+        items: matchingItems,
+        totalSets: totalSetsForLot,
+        totalLoosePcs: totalLoosePcsForLot,
+        totalQuantity: totalQuantityForLot,
+        lotNumber: lotNumber
+      });
     }
+  });
 
-    const results = [];
-    const lowerLotNumber = lotNumber.toLowerCase();
-
-    recentDispatches.forEach(dispatch => {
-      const matchingItems = dispatch.items.filter(item => 
-        item.lotNumber?.toLowerCase().includes(lowerLotNumber)
-      );
-
-      if (matchingItems.length > 0) {
-        const totalSetsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.sets) || 0), 0);
-        const totalLoosePcsForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.loosePcs) || 0), 0);
-        const totalQuantityForLot = matchingItems.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
-
-        results.push({
-          dispatchId: dispatch.id,
-          orderNo: dispatch.orderNo,
-          partyName: dispatch.partyName,
-          status: dispatch.status,
-          billDate: dispatch.billDate,
-          items: matchingItems,
-          totalSets: totalSetsForLot,
-          totalLoosePcs: totalLoosePcsForLot,
-          totalQuantity: totalQuantityForLot,
-          lotNumber: lotNumber
-        });
-      }
-    });
-
-    setLotSearchResults(results);
-    setShowLotDetails(results.length > 0);
-    
-    if (results.length > 0 && results[0].items.length > 0) {
-      setSelectedLot(results[0].items[0].lotNumber);
-    }
-  };
+  setLotSearchResults(results);
+  setShowLotDetails(results.length > 0);
+  
+  if (results.length > 0 && results[0].items.length > 0) {
+    setSelectedLot(results[0].items[0].lotNumber);
+  }
+};
 
   const handleLotSearch = (e) => {
     const value = e.target.value;
@@ -1296,6 +1299,11 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
 
   const getFilteredDispatches = () => {
     return recentDispatches.filter(dispatch => {
+      // First filter: Only show today's bills
+      const isTodayBill = isToday(dispatch.billDate);
+      if (!isTodayBill) return false;
+      
+      // Then apply other filters
       const matchesSearch = dispatch.orderNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            dispatch.partyName?.toLowerCase().includes(searchTerm.toLowerCase());
       
@@ -1348,6 +1356,16 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
     totalLoosePcs: recentDispatches.reduce((sum, d) => sum + (parseFloat(d.totalLoosePcs) || 0), 0),
   };
 
+  // Calculate today's stats
+  const todayDispatches = recentDispatches.filter(dispatch => isToday(dispatch.billDate));
+  const todayStats = {
+    total: todayDispatches.length,
+    pending: todayDispatches.filter(d => d.status?.toLowerCase() === 'pending').length,
+    active: todayDispatches.filter(d => d.status?.toLowerCase() === 'active').length,
+    completed: todayDispatches.filter(d => d.status?.toLowerCase() === 'completed').length,
+    totalQuantity: todayDispatches.reduce((sum, d) => sum + (parseFloat(d.totalQuantity) || 0), 0),
+  };
+
   if (loading) {
     return (
       <div className="dispatch-modern-container">
@@ -1379,164 +1397,59 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   return (
     <div className="dispatch-modern-container">
       <div className="dispatch-modern-wrapper">
-     
-<div className="dispatch-modern-header">
-  <div className="dispatch-modern-header-left">
-    <button 
-      onClick={() => window.history.back()} 
-      className="dispatch-modern-back-btn"
-      title="Go Back"
-    >
-      <span className="dispatch-modern-back-icon">←</span>
-      <span>Back</span>
-    </button>
-    <div className="dispatch-modern-title-section">
-      <div className="dispatch-modern-title-icon">📦</div>
-      <div>
-        <h1 className="dispatch-modern-title">Dispatch Management</h1>
-        <p className="dispatch-modern-subtitle">Track and manage all your dispatches in one place</p>
-        {recentDispatches.length > 0 && (
-          <p className="dispatch-modern-info-badge" style={{ fontSize: '12px', color: '#059669', marginTop: '4px' }}>
-            📅 Showing bills from last 3 days (including today)
-          </p>
-        )}
-      </div>
-    </div>
-  </div>
-</div>
-
-        {/* Stats Dashboard */}
-        {/* <div className="dispatch-modern-stats-grid">
-          <div className="dispatch-modern-stat-card">
-            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-blue">
-              <span>📄</span>
-            </div>
-            <div className="dispatch-modern-stat-info">
-              <span className="dispatch-modern-stat-value">{stats.total}</span>
-              <span className="dispatch-modern-stat-label">Total Bills (Last 3 Days)</span>
+        {/* Header Section */}
+        <div className="dispatch-modern-header">
+          <div className="dispatch-modern-header-left">
+            {onBack && (
+              <button onClick={onBack} className="dispatch-modern-back-btn">
+                <span className="dispatch-modern-back-icon">←</span>
+                <span>Back</span>
+              </button>
+            )}
+            <div className="dispatch-modern-title-section">
+              <div className="dispatch-modern-title-icon">📦</div>
+              <div>
+                <h1 className="dispatch-modern-title">Today's Dispatch Management</h1>
+                <p className="dispatch-modern-subtitle">Track and manage today's dispatches in one place</p>
+              </div>
             </div>
           </div>
-          <div className="dispatch-modern-stat-card">
-            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-orange">
-              <span>⏰</span>
-            </div>
-            <div className="dispatch-modern-stat-info">
-              <span className="dispatch-modern-stat-value">{stats.pending}</span>
-              <span className="dispatch-modern-stat-label">Pending</span>
-            </div>
+          <div className="dispatch-modern-header-right">
+            <button 
+              onClick={handleBackNavigation}
+              className="dispatch-modern-back-nav-btn"
+              style={{
+                background: '#6b7280',
+                color: 'white',
+                border: 'none',
+                padding: '8px 20px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#4b5563'}
+              onMouseLeave={(e) => e.currentTarget.style.background = '#6b7280'}
+            >
+              <span>←</span>
+              <span>Back</span>
+            </button>
           </div>
-          <div className="dispatch-modern-stat-card">
-            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-blue-light">
-              <span>🚚</span>
-            </div>
-            <div className="dispatch-modern-stat-info">
-              <span className="dispatch-modern-stat-value">{stats.active}</span>
-              <span className="dispatch-modern-stat-label">Active</span>
-            </div>
-          </div>
-          <div className="dispatch-modern-stat-card">
-            <div className="dispatch-modern-stat-icon dispatch-modern-stat-icon-green">
-              <span>✓</span>
-            </div>
-            <div className="dispatch-modern-stat-info">
-              <span className="dispatch-modern-stat-value">{stats.completed}</span>
-              <span className="dispatch-modern-stat-label">Completed</span>
-            </div>
-          </div>
-        </div> */}
-
-        {/* Enhanced Metrics */}
-        <div className="dispatch-modern-metrics">
-          {/* Optional metrics - kept as is */}
         </div>
 
-        {/* Date Range Filter Section */}
-        <div className="dispatch-modern-filter-section">
-          <div className="dispatch-modern-filter-header">
-            <span className="dispatch-modern-filter-header-icon">📅</span>
-            <h3>Date Range Filter</h3>
-            <span className="dispatch-modern-filter-badge">Filter bills by date</span>
-          </div>
-          
-          <div className="dispatch-modern-date-range-container">
-            <div className="dispatch-modern-date-range-controls">
-              <div className="dispatch-modern-date-input-group">
-                <label>Filter By:</label>
-                <select 
-                  value={dateFilterType} 
-                  onChange={(e) => setDateFilterType(e.target.value)}
-                  className="dispatch-modern-filter-select"
-                >
-                  <option value="billDate">Bill Date</option>
-                  <option value="dueDate">Due Date</option>
-                </select>
-              </div>
-              
-              <div className="dispatch-modern-date-input-group">
-                <label>From Date:</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="dispatch-modern-date-input"
-                />
-              </div>
-              
-              <div className="dispatch-modern-date-input-group">
-                <label>To Date:</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="dispatch-modern-date-input"
-                />
-              </div>
-              
-              <div className="dispatch-modern-date-actions">
-                <button 
-                  onClick={() => {
-                    setStartDate('');
-                    setEndDate('');
-                  }}
-                  className="dispatch-modern-clear-date-btn"
-                >
-                  Clear Dates
-                </button>
-              </div>
-            </div>
-            
-            {/* PDF Download Buttons - Sales Register */}
-            {(startDate || endDate) && filteredDispatches.length > 0 && (
-              <div className="dispatch-modern-pdf-actions">
-                <button 
-                  onClick={generateSalesRegisterPDF}
-                  className="dispatch-modern-pdf-btn dispatch-modern-pdf-register"
-                >
-                  <span>📊</span>
-                  Download Sales Register
-                </button>
-                <button 
-                  onClick={exportAllToExcel}
-                  disabled={generatingExcel}
-                  className="dispatch-modern-excel-btn"
-                  style={{
-                    background: '#10b981',
-                    color: 'white',
-                    border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <span>📊</span>
-                  {generatingExcel ? 'Exporting...' : 'Export to Excel'}
-                </button>
-              </div>
-            )}
+        {/* Today's Date Display */}
+        <div className="dispatch-modern-today-date">
+          <div className="dispatch-modern-date-badge-large">
+            <span>📅</span>
+            <strong>Today's Date:</strong> {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            })}
           </div>
         </div>
 
@@ -1547,7 +1460,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
               <span>🏷️</span>
               <h3>Item Name / Style Search</h3>
             </div>
-            <p className="dispatch-modern-section-desc">Search for specific items across all dispatches (e.g., tracksuit, shirt, jeans, etc.)</p>
+            <p className="dispatch-modern-section-desc">Search for specific items across today's dispatches</p>
           </div>
           
           <div className="dispatch-modern-item-search-container">
@@ -1722,7 +1635,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
           {showItemFilterResults && itemFilterResults.length === 0 && itemSearchTerm && (
             <div className="dispatch-modern-no-results">
               <span>🔍</span>
-              <p>No items found matching "<strong>{itemSearchTerm}</strong>"</p>
+              <p>No items found matching "<strong>{itemSearchTerm}</strong>" in today's dispatches</p>
               <p className="dispatch-modern-no-results-hint">Try searching with different keywords like brand name, product type, or description</p>
             </div>
           )}
@@ -1735,14 +1648,14 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
               <span>🏷️</span>
               <h3>Lot Number Tracking</h3>
             </div>
-            <p className="dispatch-modern-section-desc">Search and track lots across all dispatches</p>
+            <p className="dispatch-modern-section-desc">Search and track lots across today's dispatches</p>
           </div>
           
           <div className="dispatch-modern-search-wrapper">
             <span className="dispatch-modern-search-icon">🔍</span>
             <input
               type="text"
-              placeholder="Enter lot number to track across all dispatches..."
+              placeholder="Enter lot number to track across today's dispatches..."
               value={lotSearchTerm}
               onChange={handleLotSearch}
               className="dispatch-modern-lot-input"
@@ -1882,7 +1795,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
               ) : (
                 <div className="dispatch-modern-no-results">
                   <span>🔍</span>
-                  <p>No dispatches found with lot number: <strong>{lotSearchTerm}</strong></p>
+                  <p>No dispatches found with lot number: <strong>{lotSearchTerm}</strong> in today's records</p>
                 </div>
               )}
             </div>
@@ -1907,6 +1820,9 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
               const icon = status === 'all' ? '📊' : 
                           status === 'pending' ? '⏰' : 
                           status === 'active' ? '🚚' : '✓';
+              const count = status === 'all' ? todayStats.total :
+                           status === 'pending' ? todayStats.pending :
+                           status === 'active' ? todayStats.active : todayStats.completed;
               return (
                 <button
                   key={status}
@@ -1917,7 +1833,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
                   <span>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
                   {status !== 'all' && (
                     <span className="dispatch-modern-filter-count">
-                      {stats[status === 'pending' ? 'pending' : status === 'active' ? 'active' : 'completed']}
+                      {count}
                     </span>
                   )}
                 </button>
@@ -1926,7 +1842,7 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
           </div>
           
           {/* Export All Button */}
-          {/* <button 
+          <button 
             onClick={exportAllToExcel}
             disabled={generatingExcel}
             className="dispatch-modern-export-all-btn"
@@ -1945,22 +1861,14 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
             }}
           >
             <span>📊</span>
-            {generatingExcel ? 'Exporting...' : 'Export All to Excel'}
-          </button> */}
+            {generatingExcel ? 'Exporting...' : 'Export Today\'s Data to Excel'}
+          </button>
         </div>
 
         {/* Active Filters Display */}
         {(startDate || endDate || searchTerm || statusFilter !== 'all' || itemSearchTerm) && (
           <div className="dispatch-modern-active-filters">
             <span className="dispatch-modern-active-filters-label">Active Filters:</span>
-            {(startDate || endDate) && (
-              <span className="dispatch-modern-filter-tag">
-                📅 {dateFilterType === 'billDate' ? 'Bill Date' : 'Due Date'}: 
-                {startDate && ` ${new Date(startDate).toLocaleDateString()}`}
-                {endDate && ` - ${new Date(endDate).toLocaleDateString()}`}
-                <button onClick={() => { setStartDate(''); setEndDate(''); }} className="dispatch-modern-remove-filter">×</button>
-              </span>
-            )}
             {searchTerm && (
               <span className="dispatch-modern-filter-tag">
                 🔍 Search: {searchTerm}
@@ -1994,16 +1902,13 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
 
         {/* Filter Result Info */}
         <div className="dispatch-modern-filter-info">
-          <span>Showing {filteredDispatches.length} of {recentDispatches.length} bills</span>
-          {(startDate || endDate) && (
-            <span className="dispatch-modern-date-badge">
-              📅 {startDate && new Date(startDate).toLocaleDateString()}
-              {endDate && ` - ${new Date(endDate).toLocaleDateString()}`}
-            </span>
-          )}
+          <span>Showing {filteredDispatches.length} of {todayStats.total} today's bills</span>
+          <span className="dispatch-modern-date-badge">
+            📅 {new Date().toLocaleDateString()}
+          </span>
         </div>
 
-        {/* Dispatches Table */}
+        {/* Dispatches Table - Today Only */}
         <div className="dispatch-modern-table-container">
           <table className="dispatch-modern-table">
             <thead>
@@ -2246,17 +2151,15 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
                 <tr>
                   <td colSpan="11" className="dispatch-modern-empty">
                     <span>📦</span>
-                    <h3>No dispatches found</h3>
+                    <h3>No dispatches found for today</h3>
                     <p>
-                      {(startDate || endDate) 
-                        ? `No bills found for the selected date range` 
-                        : searchTerm 
-                        ? `No results matching "${searchTerm}"` 
-                        : "No bills found from the last 3 days (including today)"}
+                      {searchTerm 
+                        ? `No results matching "${searchTerm}" in today's dispatches` 
+                        : "There are no dispatch records for today"}
                     </p>
-                    {(startDate || endDate) && (
-                      <button onClick={() => { setStartDate(''); setEndDate(''); }} className="dispatch-modern-btn-primary">
-                        Clear Date Filter
+                    {searchTerm && (
+                      <button onClick={() => setSearchTerm('')} className="dispatch-modern-btn-primary">
+                        Clear Search
                       </button>
                     )}
                   </td>
@@ -2270,4 +2173,4 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   );
 }
 
-export default DispatchDetails;
+export default TodayDispatchDetail;

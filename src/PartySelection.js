@@ -1,8 +1,10 @@
 // PartySelection.js - Modern Split Layout with Navy & White Theme
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from 'react-router-dom'; // ADD THIS IMPORT
 import "./PartySelection.css";
 
 const PartySelection = ({ onSelectParty, onBack }) => {
+  const navigate = useNavigate(); // ADD THIS LINE
   const [searchTerm, setSearchTerm] = useState("");
   const [parties, setParties] = useState([]);
   const [filteredParties, setFilteredParties] = useState([]);
@@ -93,7 +95,7 @@ const PartySelection = ({ onSelectParty, onBack }) => {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Filter parties based on search term (only when typing)
+  // Filter parties based on search term
   useEffect(() => {
     if (!parties || parties.length === 0) {
       setFilteredParties([]);
@@ -158,9 +160,28 @@ const PartySelection = ({ onSelectParty, onBack }) => {
     setSelectedIndex(-1);
   };
 
+  // UPDATED: This function now handles navigation
   const handleConfirmSelection = () => {
-    if (selectedParty && onSelectParty) {
-      onSelectParty(selectedParty);
+    if (selectedParty) {
+      // Store in localStorage for the billing page to read
+      localStorage.setItem('selectedParty', JSON.stringify(selectedParty));
+      
+      // Call the onSelectParty prop if provided (for backward compatibility)
+      if (onSelectParty) {
+        onSelectParty(selectedParty);
+      }
+      
+      // Navigate to party bill page
+      navigate('/party-bill');
+    }
+  };
+
+  // UPDATED: Handle back button navigation
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigate('/');
     }
   };
 
@@ -209,7 +230,7 @@ const PartySelection = ({ onSelectParty, onBack }) => {
       <div className="ps-content">
         {/* Header */}
         <div className="ps-header">
-          <button onClick={onBack} className="ps-back-btn">
+          <button onClick={handleBack} className="ps-back-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 18l-6-6 6-6"/>
             </svg>
@@ -236,7 +257,7 @@ const PartySelection = ({ onSelectParty, onBack }) => {
           </div>
         )}
 
-        {/* Split Layout - Left: Suggestions, Right: Search & Details */}
+        {/* Split Layout */}
         <div className="ps-split-layout">
           {/* Left Panel - Suggestions */}
           <div className="ps-left-panel">
@@ -308,7 +329,7 @@ const PartySelection = ({ onSelectParty, onBack }) => {
             </div>
           </div>
 
-          {/* Right Panel - Search & Party Details */}
+          {/* Right Panel */}
           <div className="ps-right-panel">
             <div className="ps-search-section">
               <div className="ps-search-header">
