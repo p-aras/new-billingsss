@@ -38,60 +38,61 @@ function DispatchDetails({ updateDispatchStatus, onBack }) {
   }, []);
 
   // Function to filter bills from last 3 days (including today)
-  const filterLastThreeDaysIncludingToday = (dispatches) => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
+ // Function to filter bills from last 2 days (today and yesterday only)
+const filterLastThreeDaysIncludingToday = (dispatches) => {
+  const today = new Date();
+  today.setHours(23, 59, 59, 999); // End of today
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0); // Start of yesterday
+  
+  return dispatches.filter(dispatch => {
+    if (!dispatch.billDate) return false;
     
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(today.getDate() - 3);
-    threeDaysAgo.setHours(0, 0, 0, 0); // Start of the day 3 days ago
-    
-    return dispatches.filter(dispatch => {
-      if (!dispatch.billDate) return false;
-      
-      try {
-        const billDate = new Date(dispatch.billDate);
-        billDate.setHours(12, 0, 0, 0); // Set to noon to avoid timezone issues
-        
-        // Check if bill date is within last 3 days (including today)
-        return billDate >= threeDaysAgo && billDate <= today;
-      } catch (e) {
-        console.error('Error parsing date for filtering:', e);
-        return false;
-      }
-    });
-  };
-
-  const fetchDispatchData = async () => {
     try {
-      setLoading(true);
-      const range = `${SHEET_NAME}!A:Z`;
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?key=${API_KEY}`;
+      const billDate = new Date(dispatch.billDate);
+      billDate.setHours(12, 0, 0, 0); // Set to noon to avoid timezone issues
       
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.values && data.values.length > 0) {
-        const dispatches = transformSheetData(data.values);
-        // Filter to only show last 3 days (including today)
-        const lastThreeDaysDispatches = filterLastThreeDaysIncludingToday(dispatches);
-        setRecentDispatches(lastThreeDaysDispatches);
-        
-        // Optional: Show console log if bills are filtered out
-        if (dispatches.length > 0 && lastThreeDaysDispatches.length === 0) {
-          console.log('No bills found from the last 3 days (including today)');
-        }
-      } else {
-        setRecentDispatches([]);
-      }
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      setError('Failed to load dispatch data: ' + err.message);
-      setRecentDispatches([]);
-    } finally {
-      setLoading(false);
+      // Check if bill date is today or yesterday
+      return billDate >= yesterday && billDate <= today;
+    } catch (e) {
+      console.error('Error parsing date for filtering:', e);
+      return false;
     }
-  };
+  });
+};
+
+const fetchDispatchData = async () => {
+  try {
+    setLoading(true);
+    const range = `${SHEET_NAME}!A:Z`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?key=${API_KEY}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.values && data.values.length > 0) {
+      const dispatches = transformSheetData(data.values);
+      // Filter to only show last 2 days (today and yesterday)
+      const lastThreeDaysDispatches = filterLastThreeDaysIncludingToday(dispatches);
+      setRecentDispatches(lastThreeDaysDispatches);
+      
+      // Optional: Show console log if bills are filtered out
+      if (dispatches.length > 0 && lastThreeDaysDispatches.length === 0) {
+        console.log('No bills found from today or yesterday');
+      }
+    } else {
+      setRecentDispatches([]);
+    }
+  } catch (err) {
+    console.error('Error fetching data:', err);
+    setError('Failed to load dispatch data: ' + err.message);
+    setRecentDispatches([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const transformSheetData = (sheetValues) => {
     const headers = sheetValues[0];
