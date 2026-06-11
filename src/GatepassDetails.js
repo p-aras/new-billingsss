@@ -74,24 +74,43 @@ const GatepassDetails = ({ onBack, userRole, userData }) => {
     }
   };
 
-  const isWithinLastTwoDays = (dateString) => {
-    if (!dateString) return false;
+ const isWithinLastTwoDays = (dateString) => {
+  if (!dateString) return false;
+  
+  try {
+    // Get today's date at midnight
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    try {
-      const gatepassDate = new Date(dateString);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      const twoDaysAgo = new Date(today);
-      twoDaysAgo.setDate(today.getDate() - 2);
-      twoDaysAgo.setHours(0, 0, 0, 0);
-      
-      return gatepassDate >= twoDaysAgo && gatepassDate <= today;
-    } catch (error) {
-      console.error('Error checking date range:', error);
-      return false;
+    // Get yesterday's date
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    
+    // Parse the gatepass date
+    let gatepassDate;
+    if (typeof dateString === 'string') {
+      // Handle YYYY-MM-DD format
+      if (dateString.includes('-')) {
+        const [year, month, day] = dateString.split('-');
+        gatepassDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      } else {
+        gatepassDate = new Date(dateString);
+      }
+    } else {
+      gatepassDate = new Date(dateString);
     }
-  };
+    
+    // Reset time to midnight for comparison
+    gatepassDate.setHours(0, 0, 0, 0);
+    
+    // Check if date is today OR yesterday
+    return gatepassDate.getTime() === today.getTime() || 
+           gatepassDate.getTime() === yesterday.getTime();
+  } catch (error) {
+    console.error('Error checking date range:', error);
+    return false;
+  }
+};
 
   const isToday = (dateString) => {
     if (!dateString) return false;
@@ -326,212 +345,216 @@ const GatepassDetails = ({ onBack, userRole, userData }) => {
     return dateString;
   };
 
-  const downloadGatepassPDF = (isSingle = false, singleItem = null) => {
-    try {
-      if (typeof jsPDF === 'undefined') {
-        alert("PDF library not loaded. Please refresh the page.");
-        return false;
-      }
-      
-      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 10;
-      const contentWidth = pageWidth - (margin * 2);
-
-      const safeFormatDisplayDate = (dateValue) => {
-        if (!dateValue) return '';
-        try {
-          if (typeof dateValue === 'string') {
-            const date = new Date(dateValue);
-            if (!isNaN(date.getTime())) {
-              return date.toLocaleDateString('en-GB');
-            }
-            return dateValue;
-          }
-          return '';
-        } catch (error) {
-          return String(dateValue);
-        }
-      };
-
-      // Royal Navy themed PDF
-      doc.setFont("times", "bold");
-      doc.setFontSize(20);
-      doc.setTextColor(0, 32, 64);
-      doc.text("GATE PASS SUMMARY", pageWidth / 2, 15, { align: "center" });
-      
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      const roleText = `Access Level: ${roleInfo.accessLevel.toUpperCase()} - ${roleInfo.message}`;
-      doc.text(roleText, pageWidth / 2, 22, { align: "center" });
-      
-      const generationTime = new Date().toLocaleString();
-      doc.text(`Generated on: ${generationTime}`, pageWidth / 2, 27, { align: "center" });
-
-      const headers = ["Date", "Particulars", "Bags details", "Driver", "Tempo no."];
-      const colWidths = [22, 80, 25, 30, 35];
-      
-      let yPos = 35;
-      const itemsToShow = isSingle ? (singleItem ? [singleItem] : []) : (filteredData || []);
-      
-      if (itemsToShow.length === 0) {
-        doc.setFontSize(12);
-        doc.text("No data available to generate PDF", pageWidth / 2, yPos + 20, { align: "center" });
-        doc.save("Empty_Report.pdf");
-        return true;
-      }
-
-      // Table Header with Royal Navy background
-      doc.setFontSize(10);
-      doc.setDrawColor(0, 32, 64);
-      doc.setFillColor(0, 32, 64);
-      doc.rect(margin, yPos, contentWidth, 10, 'F');
-      doc.setTextColor(255, 255, 255);
-      
-      let currentX = margin;
-      headers.forEach((header, i) => {
-        const textWidth = doc.getTextWidth(header);
-        doc.text(header, currentX + (colWidths[i] / 2) - (textWidth / 2), yPos + 7);
-        currentX += colWidths[i];
-        if (i < headers.length - 1) {
-          doc.setDrawColor(255, 255, 255);
-          doc.line(currentX, yPos, currentX, yPos + 10);
-          doc.setDrawColor(0, 32, 64);
-        }
-      });
-
-      yPos += 10;
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("times", "normal");
-      doc.setFontSize(9);
-
-      let totalPetti = 0;
-      let totalBora = 0;
-      let totalPolybags = 0;
-
-      itemsToShow.forEach((item, index) => {
-        const rowHeight = 10;
-        const formattedDate = safeFormatDisplayDate(item.date);
-        
-        const values = [
-          formattedDate,
-          item.partyName || '',
-          item.bagDetails || '',
-          item.driverName || '',
-          item.vehicleNumber || ''
-        ];
-
-        if (item.bagDetails && typeof item.bagDetails === 'string') {
-          const bagText = item.bagDetails;
-          const pettiMatch = bagText.match(/Petti[:\s]*(\d+)|(\d+)[\s]*Petti/i);
-          if (pettiMatch) {
-            totalPetti += parseInt(pettiMatch[1] || pettiMatch[2]) || 0;
-          }
-          const boraMatch = bagText.match(/Bora[:\s]*(\d+)|(\d+)[\s]*Bora/i);
-          if (boraMatch) {
-            totalBora += parseInt(boraMatch[1] || boraMatch[2]) || 0;
-          }
-          const polybagsMatch = bagText.match(/Polybags?[:\s]*(\d+)|(\d+)[\s]*Polybags?/i);
-          if (polybagsMatch) {
-            totalPolybags += parseInt(polybagsMatch[1] || polybagsMatch[2]) || 0;
-          }
-        }
-
-        if (yPos + rowHeight > pageHeight - 45) {
-          doc.addPage();
-          yPos = 10;
-          doc.setFontSize(10);
-          doc.setDrawColor(0, 32, 64);
-          doc.setFillColor(0, 32, 64);
-          doc.rect(margin, yPos, contentWidth, 10, 'F');
-          doc.setTextColor(255, 255, 255);
-          currentX = margin;
-          headers.forEach((header, i) => {
-            const textWidth = doc.getTextWidth(header);
-            doc.text(header, currentX + (colWidths[i] / 2) - (textWidth / 2), yPos + 7);
-            currentX += colWidths[i];
-            if (i < headers.length - 1) {
-              doc.setDrawColor(255, 255, 255);
-              doc.line(currentX, yPos, currentX, yPos + 10);
-              doc.setDrawColor(0, 32, 64);
-            }
-          });
-          yPos += 10;
-          doc.setTextColor(0, 0, 0);
-        }
-
-        doc.setDrawColor(200, 200, 200);
-        doc.rect(margin, yPos, contentWidth, rowHeight);
-        let rowX = margin;
-        values.forEach((val, i) => {
-          let text = String(val || '');
-          if (i === 1 && text.length > 50) {
-            text = text.substring(0, 47) + '...';
-          }
-          doc.text(text, rowX + 2, yPos + 6);
-          rowX += colWidths[i];
-          if (i < values.length - 1) {
-            doc.line(rowX, yPos, rowX, yPos + rowHeight);
-          }
-        });
-        yPos += rowHeight;
-      });
-
-      if (totalPetti > 0 || totalBora > 0 || totalPolybags > 0) {
-        yPos += 5;
-        const summaryHeight = 35;
-        
-        if (yPos + summaryHeight > pageHeight - margin) {
-          doc.addPage();
-          yPos = 20;
-        }
-        
-        doc.setDrawColor(0, 32, 64);
-        doc.setFillColor(240, 248, 255);
-        doc.rect(margin, yPos, contentWidth, summaryHeight, 'F');
-        doc.rect(margin, yPos, contentWidth, summaryHeight);
-        
-        doc.setFont("times", "bold");
-        doc.setFontSize(12);
-        doc.setTextColor(0, 32, 64);
-        doc.text("TOTAL SUMMARY", pageWidth / 2, yPos + 8, { align: "center" });
-        
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-        const summaryStartX = margin + 10;
-        let summaryTextY = yPos + 18;
-        
-        doc.text(`Total Petti: ${totalPetti}`, summaryStartX, summaryTextY);
-        doc.text(`Total Bora: ${totalBora}`, summaryStartX + 60, summaryTextY);
-        doc.text(`Total Polybags: ${totalPolybags}`, summaryStartX + 120, summaryTextY);
-        
-        summaryTextY += 8;
-        const grandTotal = totalPetti + totalBora + totalPolybags;
-        doc.setFont("times", "bold");
-        doc.setTextColor(0, 32, 64);
-        doc.text(`Grand Total (All Bags): ${grandTotal}`, summaryStartX, summaryTextY);
-      }
-
-      const footerY = pageHeight - 10;
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      const userName = userData?.name || userData?.username || roleInfo.role;
-      doc.text(`Generated by: ${userName} (${roleInfo.accessLevel.toUpperCase()})`, margin, footerY);
-      doc.text(`Page ${doc.internal.getNumberOfPages()}`, pageWidth - margin, footerY, { align: "right" });
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-      const fileName = `Gatepass_Summary_${roleInfo.accessLevel}_${timestamp}.pdf`;
-      
-      doc.save(fileName);
-      return true;
-
-    } catch (error) {
-      console.error("PDF Error:", error);
-      alert(`Failed to generate PDF: ${error.message}`);
+const downloadGatepassPDF = (isSingle = false, singleItem = null) => {
+  try {
+    if (typeof jsPDF === 'undefined') {
+      alert("PDF library not loaded. Please refresh the page.");
       return false;
     }
-  };
+    
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const contentWidth = pageWidth - (margin * 2);
+
+    const safeFormatDisplayDate = (dateValue) => {
+      if (!dateValue) return '';
+      try {
+        if (typeof dateValue === 'string') {
+          const date = new Date(dateValue);
+          if (!isNaN(date.getTime())) {
+            return date.toLocaleDateString('en-GB');
+          }
+          return dateValue;
+        }
+        return '';
+      } catch (error) {
+        return String(dateValue);
+      }
+    };
+
+    // Royal Navy themed PDF
+    doc.setFont("times", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(0, 32, 64);
+    doc.text("GATE PASS SUMMARY", pageWidth / 2, 15, { align: "center" });
+    
+    
+    
+    const generationTime = new Date().toLocaleString();
+    doc.text(`Generated on: ${generationTime}`, pageWidth / 2, 27, { align: "center" });
+
+    // Updated headers - Increased Tempo no. width for full display
+    const headers = ["Date", "Bill No.", "Particulars", "Bags details", "Driver", "Tempo no."];
+    const colWidths = [20, 22, 75, 22, 28, 35]; // Tempo no.: 35mm for full number display
+    
+    let yPos = 35;
+    const itemsToShow = isSingle ? (singleItem ? [singleItem] : []) : (filteredData || []);
+    
+    if (itemsToShow.length === 0) {
+      doc.setFontSize(12);
+      doc.text("No data available to generate PDF", pageWidth / 2, yPos + 20, { align: "center" });
+      doc.save("Empty_Report.pdf");
+      return true;
+    }
+
+    // Table Header with Royal Navy background
+    doc.setFontSize(10);
+    doc.setDrawColor(0, 32, 64);
+    doc.setFillColor(0, 32, 64);
+    doc.rect(margin, yPos, contentWidth, 10, 'F');
+    doc.setTextColor(255, 255, 255);
+    
+    let currentX = margin;
+    headers.forEach((header, i) => {
+      const textWidth = doc.getTextWidth(header);
+      doc.text(header, currentX + (colWidths[i] / 2) - (textWidth / 2), yPos + 7);
+      currentX += colWidths[i];
+      if (i < headers.length - 1) {
+        doc.setDrawColor(255, 255, 255);
+        doc.line(currentX, yPos, currentX, yPos + 10);
+        doc.setDrawColor(0, 32, 64);
+      }
+    });
+
+    yPos += 10;
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("times", "normal");
+    doc.setFontSize(9);
+
+    let totalPetti = 0;
+    let totalBora = 0;
+    let totalPolybags = 0;
+
+    itemsToShow.forEach((item, index) => {
+      const rowHeight = 10;
+      const formattedDate = safeFormatDisplayDate(item.date);
+      
+      const values = [
+        formattedDate,
+        item.billNumber || '',
+        item.partyName || '',
+        item.bagDetails || '',
+        item.driverName || '',
+        item.vehicleNumber || ''
+      ];
+
+      if (item.bagDetails && typeof item.bagDetails === 'string') {
+        const bagText = item.bagDetails;
+        const pettiMatch = bagText.match(/Petti[:\s]*(\d+)|(\d+)[\s]*Petti/i);
+        if (pettiMatch) {
+          totalPetti += parseInt(pettiMatch[1] || pettiMatch[2]) || 0;
+        }
+        const boraMatch = bagText.match(/Bora[:\s]*(\d+)|(\d+)[\s]*Bora/i);
+        if (boraMatch) {
+          totalBora += parseInt(boraMatch[1] || boraMatch[2]) || 0;
+        }
+        const polybagsMatch = bagText.match(/Polybags?[:\s]*(\d+)|(\d+)[\s]*Polybags?/i);
+        if (polybagsMatch) {
+          totalPolybags += parseInt(polybagsMatch[1] || polybagsMatch[2]) || 0;
+        }
+      }
+
+      if (yPos + rowHeight > pageHeight - 45) {
+        doc.addPage();
+        yPos = 10;
+        doc.setFontSize(10);
+        doc.setDrawColor(0, 32, 64);
+        doc.setFillColor(0, 32, 64);
+        doc.rect(margin, yPos, contentWidth, 10, 'F');
+        doc.setTextColor(255, 255, 255);
+        currentX = margin;
+        headers.forEach((header, i) => {
+          const textWidth = doc.getTextWidth(header);
+          doc.text(header, currentX + (colWidths[i] / 2) - (textWidth / 2), yPos + 7);
+          currentX += colWidths[i];
+          if (i < headers.length - 1) {
+            doc.setDrawColor(255, 255, 255);
+            doc.line(currentX, yPos, currentX, yPos + 10);
+            doc.setDrawColor(0, 32, 64);
+          }
+        });
+        yPos += 10;
+        doc.setTextColor(0, 0, 0);
+      }
+
+      doc.setDrawColor(200, 200, 200);
+      doc.rect(margin, yPos, contentWidth, rowHeight);
+      let rowX = margin;
+      values.forEach((val, i) => {
+        let text = String(val || '');
+        // Adjust truncation - REMOVED truncation for Tempo no. column
+        if (i === 2 && text.length > 50) { // Party name column
+          text = text.substring(0, 47) + '...';
+        }
+        if (i === 1 && text.length > 12) { // Bill number column
+          text = text.substring(0, 10) + '...';
+        }
+        // No truncation for Tempo no. (i === 5) - display full number
+        doc.text(text, rowX + 2, yPos + 6);
+        rowX += colWidths[i];
+        if (i < values.length - 1) {
+          doc.line(rowX, yPos, rowX, yPos + rowHeight);
+        }
+      });
+      yPos += rowHeight;
+    });
+
+    if (totalPetti > 0 || totalBora > 0 || totalPolybags > 0) {
+      yPos += 5;
+      const summaryHeight = 35;
+      
+      if (yPos + summaryHeight > pageHeight - margin) {
+        doc.addPage();
+        yPos = 20;
+      }
+      
+      doc.setDrawColor(0, 32, 64);
+      doc.setFillColor(240, 248, 255);
+      doc.rect(margin, yPos, contentWidth, summaryHeight, 'F');
+      doc.rect(margin, yPos, contentWidth, summaryHeight);
+      
+      doc.setFont("times", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(0, 32, 64);
+      doc.text("TOTAL SUMMARY", pageWidth / 2, yPos + 8, { align: "center" });
+      
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      const summaryStartX = margin + 10;
+      let summaryTextY = yPos + 18;
+      
+      doc.text(`Total Petti: ${totalPetti}`, summaryStartX, summaryTextY);
+      doc.text(`Total Bora: ${totalBora}`, summaryStartX + 60, summaryTextY);
+      doc.text(`Total Polybags: ${totalPolybags}`, summaryStartX + 120, summaryTextY);
+      
+      summaryTextY += 8;
+      const grandTotal = totalPetti + totalBora + totalPolybags;
+      doc.setFont("times", "bold");
+      doc.setTextColor(0, 32, 64);
+      doc.text(`Grand Total (All Bags): ${grandTotal}`, summaryStartX, summaryTextY);
+    }
+
+    const footerY = pageHeight - 10;
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    const userName = userData?.name || userData?.username || roleInfo.role;
+    doc.text(`Generated by: ${userName} (${roleInfo.accessLevel.toUpperCase()})`, margin, footerY);
+    doc.text(`Page ${doc.internal.getNumberOfPages()}`, pageWidth - margin, footerY, { align: "right" });
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+    const fileName = `Gatepass_Summary_${roleInfo.accessLevel}_${timestamp}.pdf`;
+    
+    doc.save(fileName);
+    return true;
+
+  } catch (error) {
+    console.error("PDF Error:", error);
+    alert(`Failed to generate PDF: ${error.message}`);
+    return false;
+  }
+};
 
   const downloadAllDataPDF = () => {
     if (filteredData.length === 0) {
